@@ -1,0 +1,31 @@
+{
+  "name": "pay-me-twice",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Pay Me Twice — interactive duplicate-invoice defense sandbox. Sample data only, no real payments.",
+  "scripts": {
+    "dev": "vite",
+    "api": "node server/server.mjs",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "start": "node server/server.mjs",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-mono": "5.3.0",
+    "@fontsource/ibm-plex-sans": "5.3.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "@types/react": "18.3.18",
+    "@types/react-dom": "18.3.5",
+    "@vitejs/plugin-react": "4.3.4",
+    "typescript": "5.7.2",
+    "vite": "5.4.11",
+    "vitest": "2.1.8"
+  }
+}
