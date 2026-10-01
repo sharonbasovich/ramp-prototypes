@@ -2,6 +2,10 @@
 
 Audit date: October 1, 2026. No implementation files were edited. Browser automation and online hackathon projects were not touched.
 
+## Current status after independent re-audit
+
+The original reviews below are historical evidence at Borrow `e2942ab`/`ef0ad26` and Exit `31bc5d0`. Final re-audits at **Borrow `df48f9e`** and **Exit `7fd9f56`** verify all listed findings repaired: builds/typechecks, **47 Borrow tests / 40 Exit tests**, and every retained original/new independent probe pass. **No current blocking engine/API finding remains in either app.** Full exact repros and observations are retained in this directory; see the dated final gate sections. Root's real-browser testing is separate from this read-only engine/API audit.
+
 ## BorrowFirst scope and environment
 
 - Checkout: `C:/Users/Sharon/Documents/ChatGPT/hackthenorth/output/ramp-review-borrow`
@@ -11,6 +15,16 @@ Audit date: October 1, 2026. No implementation files were edited. Browser automa
 - Reference: `output/ramp-handoff/SPEC-BORROW-EXIT.md`
 - Local API audit ran on isolated port **15313**, not the root integration server on 5313. A separate two-launch persistence test used 15314 and a temporary database.
 - Independent probes called the compiled production engine/store and real HTTP API. React's server renderer verified the post-reservation review output. This is not a claim of visual browser or accessibility verification.
+
+### Retained repro runner
+
+`output/ramp-handoff/REPRO-BORROW.mjs` retains the independently executed engine, API, offset-hold, persistence, storage-failure and React-render repros. It was syntax-checked and executed successfully against the reviewed checkout. Build the app first, then run:
+
+```powershell
+node --experimental-sqlite C:/Users/Sharon/Documents/ChatGPT/hackthenorth/output/ramp-handoff/REPRO-BORROW.mjs C:/Users/Sharon/Documents/ChatGPT/hackthenorth/output/ramp-review-borrow/apps/borrowfirst
+```
+
+For a patched checkout, replace only the final app path. The runner emits observed/expected JSON lines and stops its own temporary servers. The post-reservation React output deliberately reproduces the old prop-state combination; use the emitted real `App` wiring plus root's browser verification to judge whether the integration fix landed. Do not interpret that isolated component observation alone as proof that a fixed App still sends the old props.
 
 ## Verification results
 
@@ -159,6 +173,136 @@ Test stores and the final inspection connection remain open when `afterAll` recu
 - “USB-C power delivery” is a UI label while compatibility records only a `USB-C` port token. A USB-C connector does not prove power-delivery capability. Model that requirement explicitly or shorten the supported claim to USB-C port.
 - The `/api/hold` endpoint neither validates parseable expiry timestamps nor returns a dedicated conflict when its insertion hits an active reservation. The expiry normalization repair should include its boundary behavior.
 
-## ExitLane
+## BorrowFirst re-audit at ef0ad26
 
-ExitLane implementation checkout has not yet been supplied. **Not audited yet.** The acceptance matrix in `SPEC-BORROW-EXIT.md` remains the reference; no ExitLane test or completion claim is made here.
+`npm ci`, production build, client/server typecheck, and **43 tests pass with exit 0**. Running every retained original probe against this commit verifies:
+
+- Forced asset controls now return the correct mandatory assets/costs, including $250 for forced M-102 alone and $280 for all three forced monitors.
+- Waterloo/Toronto destinations produce different supported routes and costs ($255/$325).
+- ISO offset hold comparisons normalize correctly: still-live `-04:00` holds cannot be stolen; expired `+02:00` holds can be released.
+- Baseline expiry and transfer-price drift reject stale reservations; owner confirmation, stale asset version and mixed currency reject invalid requests.
+- The actual HTTP race produces one reservation; partial and forged-empty plans are rejected with 409.
+- File SQLite restart preserves reservations/owner confirmation; blocked browser storage retains session memory.
+- App wiring passes the frozen `shownPlan`. Root's actual browser flow independently confirmed the completed $255 plan, Kitchener $80 and narrow layout; the isolated legacy-prop renderer is historical information only.
+- Windows teardown was repaired; the meaningful concurrency test remains.
+
+### BF-10 — P1: Reviewed quote exclusions spuriously fail authoritative reservation
+
+**Source:** `src/engine/allocate.ts`, `validatePlanIntegrity` baseline recomputation; `AllocationPlan` does not retain the reviewed quote exclusions.
+
+**Retained case:** `reviewed-quote-exclusion-reserve` in `REPRO-BORROW.mjs`.
+
+Confirm M-204; request three monitors by `2026-10-09T21:00:00.000Z`; allocate with `{excludeQuoteIds:['po-refurb']}`. The valid plan uses M-101/M-204/M-306, costs **4,500 cents**, and has reviewed baseline **67,500 cents**. Reserve rejects it as `BASELINE_STALE` because its baseline is recomputed with the explicitly excluded refurbished quote and becomes **59,000 cents**. No data or time changed.
+
+**Fix expectation:** Retain reviewed constraints and use exactly those constraints for authoritative baseline/coverage validation, or give the baseline one consistent documented meaning. The ordinary UI quote exclusion control must still allow a complete valid plan to reserve.
+
+### BF-11 — P2: Existing v1 sandbox saves lose every destination route after upgrade
+
+**Source:** `src/backend/sandbox.ts`, unchanged key `borrowfirst.sandbox.v1` and assets-only load validation; `src/engine/allocate.ts` destination route filtering.
+
+**Retained case:** `legacy-v1-sandbox-upgrade`.
+
+Existing pre-fix saved transfers have no `destinationLocationId`. The new loader accepts that old world because its assets are an array, but the destination filter rejects every old transfer. The default three-monitor plan silently changes to **zero transfers and 67,500 cents of new purchases** until the user resets.
+
+**Fix expectation:** Version the persisted schema or safely migrate old routes with explicit supported destinations. Preserve state when possible; explain an unavoidable reset. Validate the entire restored world, not just the assets array.
+
+### BF-12 — P2: Memory fallback masks working shared storage and overwrites another tab
+
+**Source:** `src/backend/sandbox.ts` `load()` returns `memoryWorld` before reading localStorage, including inside the Web Lock.
+
+**Retained case:** `cached-browser-store-overwrites-working-storage`.
+
+Two `SandboxStore` instances read shared working storage. A sequentially reserves M-101 for `tab-A`; B subsequently reserves the same M-101 from its cached seed. Both return success and the persisted world contains only `tab-B`, silently deleting A's reservation. This is a sequential stale-cache overwrite; the Web Lock does not refresh the data.
+
+**Fix expectation:** When storage works, reread/validate it under the write lock. Use memory solely when storage is unavailable. Preserve the honest single-browser/no-cross-device guarantee; this finding does not claim global multi-user coordination.
+
+**Saved complete output:** `BORROW-REPRO-ef0ad26.jsonl`. The original runner now includes all three new cases.
+
+### Final BorrowFirst gate at df48f9e
+
+**Reviewed head:** `df48f9e` (`borrowfirst: fix three reserve/sandbox regressions from audit round 3`). `npm ci`, build, typecheck and **all 47 tests pass with exit 0**. `BORROW-REPRO-df48f9e.jsonl` retains the full independent rerun, including original engine/API/persistence/fallback probes.
+
+BF-10 now succeeds: reviewed excluded-refurb baseline stays 67,500 and the 4,500-cent three-asset plan reserves correctly. BF-11 now migrates the legacy v1 save to supported routes and returns the correct conditional 25,500-cent default plan. BF-12 now rereads working storage: A succeeds, B is rejected, and the persisted reservation remains A's. Original owner confirmation, stale asset version, mixed currency, real HTTP race, partial/forged plan rejection, UTC-offset hold expiry, quote expiry, transfer drift, file restart and blocked storage checks remain correct. The historical findings above are resolved at this head; no new release blocker was found in this bounded audit.
+
+## ExitLane audit at 31bc5d0
+
+- Checkout: `C:/Users/Sharon/Documents/ChatGPT/hackthenorth/output/ramp-review-exit`, app `apps/exitlane`.
+- Runtime: Node 22.14.0 / Windows. Independent runner imports the production shared engine, executes real SQLite HTTP requests, and starts only isolated child servers on random ports.
+- `npm ci`, `npm run build`, `npm run typecheck` **pass**.
+- `npm test`: **32 meaningful assertions pass, but overall exit 1** from a Windows SQLite cleanup hook (EL-03 below).
+- Runner: `REPRO-EXIT.mjs`; complete observed/expected output: `EXIT-REPRO-31bc5d0.jsonl`.
+
+```powershell
+node --experimental-sqlite C:/Users/Sharon/Documents/ChatGPT/hackthenorth/output/ramp-handoff/REPRO-EXIT.mjs C:/Users/Sharon/Documents/ChatGPT/hackthenorth/output/ramp-review-exit/apps/exitlane
+```
+
+### EL-01 — P1: Failed retries execute against stale approvals and claim obsolete refunds
+
+**Source:** `shared/engine.mjs:251`, `shared/engine.mjs:437`, `shared/engine.mjs:561`: clock/amount changes and execute-time fingerprint checks apply only to `approved`, skipping `failed` requests.
+
+**Exact fixture:** C=30,000, P=10,000, U=20,000 USD cents; free cancellation before `2026-10-01T16:00:00Z`, 100% fee at/after that instant; provider script first fails with 503, then confirms. Clock starts at 15:00Z.
+
+**Repro:** Cancel event → prepare → approve → execute (provider failure) → move clock to exact cutoff → retry same request. Both production-memory engine and actual SQLite HTTP API confirm the second attempt. Current assessment correctly says **refund 0 and extra due 20,000**, yet the executed request counts the old **10,000 refund as confirmed due**. Two provider outcomes were recorded.
+
+The same bug reproduces after a failed attempt followed by a valid amount/version edit: new refund 11,000 vs old approved 10,000, then retry confirms old figures.
+
+**Fix expectation:** Revalidate booking status, policy/version/fingerprint and assessed eligibility immediately before every nonterminal provider attempt, including failed retries. Changes must mark stale and require fresh review/approval. No second provider outcome or financial confirmation on a stale retry. Retained cases `FAILED-retry-after-cutoff`, `FAILED-retry-after-booking-version-edit`, and `HTTP-FAILED-retry-after-cutoff`.
+
+### EL-02 — P1: Prepared bookings can become invalid and still be approved/executed
+
+**Source:** `shared/engine.mjs:360` `approvePacket`; it recomputes the assessment but unconditionally approves every previously prepared request. Execution checks only equality to that invalid fingerprint.
+
+**Repro:** Prepare the valid fixture above, then edit P to 1,000 while leaving C=30,000 and U=20,000. The displayed assessment becomes `invalid` because C != P+U. `approvePacket` nevertheless returns `approved:['audit-booking']`; execute returns a simulated confirmation, stores an outcome, and changes booking to `cancel_confirmed`. This reproduces through actual HTTP `/api/bookings/amounts`, `/api/packet/approve`, and `/api/requests/.../execute`.
+
+**Fix expectation:** Approval must check current active booking and `assessment.status==='assessed'`, otherwise exclude/reject and require correction. Execute must separately validate eligibility even if the fingerprint happens to match. Cover transition from prepared to invalid/manual-review/canceled, not only invalid input at initial prepare. Retained cases `PREPARED-invalid-booking-approved` and its `HTTP-` equivalent.
+
+### EL-03 — P2: Windows test teardown deletes an open SQLite file
+
+**Source:** `tests/acceptance.test.mjs:98`–100; `server/index.mjs` has no graceful database-close handler.
+
+The cleanup hook calls `child.kill('SIGTERM')` then immediately removes the directory. Windows reports `EBUSY ... test.sqlite`; npm test exits 1 after all 32 assertions pass. Await owned child exit and close the database before removing exact temporary files. Keep the HTTP concurrency assertions; do not ignore cleanup errors.
+
+### EL-04 — P2: Reset reuses old request IDs in the new epoch
+
+**Source:** `shared/engine.mjs:316`, request ID `req-${bookingId}` and idempotency key omit store epoch.
+
+An old ID receives 404 immediately after reset, as existing tests check. Once the same booking is prepared and approved again, the identical old ID addresses the new request and executes it with 200. An in-flight retry from the previous demo can therefore mutate the newly reset scenario. Reproduced through HTTP; old epoch 4 → new epoch 5, both IDs `req-audit-booking`.
+
+**Fix expectation:** Include epoch or a fresh unique request token in IDs and idempotency keys; stale callbacks must not address new approvals after reset. Retained case `HTTP-reset-stale-request-id` includes both immediate and after-new-approval calls.
+
+### EL-05 — P2: Parseable but corrupt localStorage state causes a startup crash loop
+
+**Source:** `shared/memstore.mjs:122` blind `Object.assign` restore; `src/backend/browser.ts:21` catches JSON parse errors but does not validate restored shape.
+
+Actual bundled browser backend with stored `{"bookings":null}` connects, then `state()` throws `TypeError: Cannot read properties of null (reading 'map')`. Reload repeats the same restore. Validate schema before replacing the seeded state, recover to a clearly labeled fresh sandbox, and preserve valid saves. Retained case `corrupt-storage-shape`.
+
+### ExitLane passing independent acceptance evidence
+
+| Area | Independently observed result |
+| --- | --- |
+| Exact cutoff and timezone | Before cutoff refund 10,000; at cutoff/offset-equivalent instant refund 0, extra 20,000; correct `<` / `>=` semantics |
+| Honest money | C=P+U required; negative/fractional/currency input rejected; negative net benefit preserved rather than clamped |
+| Policy uncertainty | Missing, unsupported, contradictory and unreadable fee policies return manual review without estimated figures |
+| Approval/version | Prepared cannot execute; normally approved policy-version drift becomes stale with no provider outcome |
+| Idempotency | Eight actual simultaneous HTTP executions produce exactly one provider outcome and seven replays |
+| Refund receipt | Eight simultaneous receipt requests record 10,000 once, with seven replays; due and received remain distinct |
+| Frozen executed history | Moving clock after a completed cancellation does not change approved financial confirmation; replay remains terminal |
+| Durable SQLite | Two-launch test retains epoch, request, outcome and exact due/received totals |
+| Blocked storage | Browser backend retains five requests and its subsequent outcome in memory when writes throw |
+| Explicit modes | Static adapter exports `Browser sandbox — this tab only`; header source distinguishes it from `SQLite backend sandbox` |
+| No real action | Provider scripts/outcomes and exports are explicitly SIMULATED; source contains no vendor/payment cancellation integration |
+
+Root owns real-browser layout, keyboard, reset/reload and visual-design verification. This report does not substitute server-render/source checks for those UI checks.
+
+### Final ExitLane gate at 7fd9f56
+
+**Reviewed head:** `7fd9f56` (`exitlane: fix audit P1/P2s, epoch-scoped request ids, storage validation, density pass`). `npm ci`, production build and typecheck pass. **All 40 tests pass with exit 0**, including Windows child shutdown/SQLite cleanup. The complete independent retained runner also passes; output is `EXIT-REPRO-7fd9f56.jsonl`.
+
+- **EL-01 repaired:** actual HTTP failure → exact cutoff → retry records **only the original failed outcome**, moves request to `stale`, keeps booking active and confirmed due at 0. Valid amount/version edits and unsupported policy changes after failure likewise refuse before another provider attempt. Unchanged failed requests still retry correctly and retain failed + confirmed history.
+- **EL-02 repaired:** prepared → inconsistent financial edit → approval returns `approved:[]`, marks request `excluded`, and execute receives 409. Booking remains active; no provider outcome exists.
+- **EL-03 repaired:** real server tests now finish cleanly on Windows; no open-file teardown failure.
+- **EL-04 repaired:** request and idempotency IDs include epoch; old `req-audit-booking-e4` returns 404 both immediately after reset and after new `req-audit-booking-e5` is approved.
+- **EL-05 repaired:** actual bundled browser backend recovers from parseable `{"bookings":null}` storage into a valid seeded state.
+- Normal eight-call HTTP cancellation/refund races still yield one outcome, seven execution replays, one receipt and seven receipt replays. File restart keeps epoch, requests, outcomes and exact financial totals. Blocked browser storage retains sequential state, and labels stay `Browser sandbox — this tab only` / `SQLite backend sandbox`.
+
+All app source remained untouched by the independent auditor. Root still owns final integration and browser verification; this gate covers the engine, actual HTTP API, isolated persistence, fallback adapter and production build/type/test checks.

@@ -1,5 +1,78 @@
 # Independent audit: Cart Tetris and root integration
 
+## Current integration status — October 1
+
+Root pushed eb0122d to the Cart branch, integrated it with all five apps, completed interactive desktop/mobile checks, and passed the full 48-test Cart suite plus all 211 suite tests. The earlier "not pushed" and "root must integrate" notes below describe the audit handoff before root completed those steps. See FINAL-QA.md for the assembled suite's current verification.
+
+## Final gate — b09cc5a + authorized local hardening eb0122d
+
+Latest reviewed Cart remote base: `b09cc5a6a525ff5e54a260b9e1b9c7c392d25137`. At root's request the auditor then fixed definite final defects on local branch **`codex/cart-final-hardening`**, commit **`eb0122d0db6e654c3f758ea92206cc910934fef9`**, with a clean worktree. **Not pushed; root must integrate/publish this five-file patch.** This section supersedes earlier audit sections.
+
+**Gate: Cart's reproduced P1s are resolved. Integration is ready after the local hardening commit is applied; interactive desktop/mobile and published Pages checks remain root-owned.** No online-event actions or app/browser sessions were launched by this audit. Existing app servers5311–5315 were not restarted or stopped.
+
+- Focused independent CSV checks: absent currency/quoted_at/valid_until columns reject; each blank required cell rejects; valid explicit `2026-09-01`/`2027-01-01` dates are preserved; injected future2027-01-02 clock rejects expired rows. No fabricated 30-day validity remains.
+- Assembled workspace `output/ramp-prototypes` at inspection commit`5d413252809f355ddc9bc4a5caf9b1900b6ff445` contains all five app packages and all five `dist/index.html` files. Four plain Node start scripts are launched directly; BorrowFirst's compound build+Node script correctly uses npm fallback. Windows process-tree cleanup exists for wrapper children.
+- Definite CI defect independently reproduced using PyYAML: unquoted `- name: Suite: install ...` caused “mapping values are not allowed here” at line72, column20. Local hardening quotes that name; parser now succeeds. CI's final suite explicitly installs/typechecks/tests/builds all five after verifying all five exist.
+- Startup previously modified its iterable with `splice` after a failed build, skipping the next app's build. Local hardening uses a separate `ready` list. Independent VM executes the exact current `runStart` function with mocked launches: a first failed build still attempts all three apps and starts only the two successful apps; all failed builds exit1/start none; prebuilt apps start without rebuild. This test starts **zero real processes**.
+- Material accepted-domain baseline precision case addressed: quote unit3500000000000001 ×3 creates an unsafe and one-cent-rounded baseline, while a second vendor's two100-cent units permit an exact safe split3500000000000201. Baseline now excludes unsafe line/subtotal/shipping totals instead of publishing an inexact comparison; two focused regression tests cover this and shipping overflow. This is an extreme-input limitation, not ordinary procurement pricing, but aligns both calculation paths' supported precision.
+- README now accurately directs local users to `npm run hub` on localhost5300, explains why direct-file hub links do not route, gives PowerShell APP-filter syntax, explains missing-dist startup builds, and requires explicit rebuild after source changes.
+- Verification: **21 tests in the changed regression file pass**, app typecheck passes, `git diff --check` passes, current CI YAML parses. Prior passing43-case whole suite and180-case independent oracle were not repeated; no engine optimization logic changed in this final patch. The npm runner consumed `-t` as a config flag, so the actual executed regression count was21, not an incorrectly claimed filtered subset.
+- Final evidence: `cart-final-gate.mjs` and `cart-final-gate-results.json`, both outside application directories. The report preserves earlier SHA-specific evidence below.
+
+Remaining nonblocking scope limitations: expiry feedback can still be clearer (guards safely refuse without a toast), and overflowing totals can show generic infeasibility rather than an explicit precision reason. App remains a bounded example-price sandbox, with no real procurement or model integration claims. No outstanding reproduced P1 remains in **b09cc5a plus eb0122d**.
+
+---
+
+## Latest re-audit — commit 93be16af011b287f8b2ab06f0e12e694be2d428b
+
+This section supersedes the initial findings below where marked fixed. Application source remains untouched. Root/browser review remains responsible for interactive desktop/mobile behavior.
+
+**Outcome:** The original critical arithmetic, identity, stale rendering, approval and Windows/hub defects are fixed in this commit. One previously requested validation fix remains: missing CSV quote provenance is still accepted and synthesized. Two minor numeric/persistence/feedback limitations remain as described below; they do not change the verified seed demonstration.
+
+### Reproduced fixes / passing evidence
+
+- Root changes **are present** (`scripts/run-apps.mjs`, 72 changed lines), even though commit title emphasizes app fixes.
+- Windows root `npm run setup` exit0, `npm test` exit0 **43/43**, and `npm run build` exit0 including typecheck. Direct `node scripts/run-apps.mjs test` also passes, exercising the fallback Windows npm launcher outside an npm context.
+- Seed still **10100 baseline → 8150 optimum → 1950 reduction**; deadline1 still10100/no Bulk Club; empty basket0. Independent per-unit oracle180 fresh cases agrees; 94,196,375-combination input safely returns `boundExceeded` in ~0.27ms.
+- Zero-price good now costs shipping500, vendorCount1, and remains in JSON export. With minimum1 it becomes infeasible. Zero-price tier semantics tested by existing regression suite.
+- Original CSV `123.5 / 1.9 / 1x / 10xyz`, mixed CAD/USD and earlier expired row rejects with exact row errors. Repeated vendor shipping/delivery conflicts, duplicate quote rows and colliding vendor-name IDs reject. Quote editor now retains/rejects decimal/blank/nonfinite data rather than truncating to valid integers.
+- Duplicate JSON vendor IDs and mismatched quote-key/SKU identities reject; signature includes quote keys. Nine-digit price-ordering now chooses999999999 over1000000000 numerically. Unit1e308 rejects as unsafe.
+- Independently called approval reducer for approve→change→restore: `revoked:true`, usablefalse. App runs reducer whenever current signature changes, preserving revocation through persisted state. Browser-event timing is root's interactive verification.
+- Explicit injectable future clock (`2027-01-02`) causes solver to reject seed quotes expired2027-01-01. Already expired2020 quotes reject before search. Code independently confirms saved expired quotes are revalidated and replaced with seed on boot; compute, approval and export each validate again. **No genuine expired quote plan is exported through the UI guard.** Boot fallback is silent rather than explaining the expiry.
+- **Executed server-side React rendering** of actual ResultsPanel with current quote set containing only `replacement-vendor`, but computed old seed plan: renders without exception, old vendor snapshot remains visible, new vendor absent, stale warning present. This is a no-browser runtime reproduction of the former stale-import crash.
+- CSV export correctly escapes vendor name `Acme, "Inc."` with a newline; currency, quotedAt and validUntil now included. JSON full provenance retained.
+- **Executed local hub HTTP check:** `/`200 with correct hub, all five `/<slug>/` paths302 to localhost5311–5315. Auditor started and stopped only its own hub process; no user/app browser touched. Relative asset paths and Pages workflow remain correct by local inspection. Root start now builds missing `dist/index.html` before launching; fresh-clone startup not independently simulated by deleting artifacts.
+
+### Remaining P1 — missing CSV validity/currency provenance gets invented
+
+Repro passed to `parseCsvQuoteSet` with `now = 2026-10-01T00:00:00Z`:
+
+```csv
+vendor,sku,unit_cents,stock,delivery_days,shipping_cents
+A,w,100,1,1,0
+```
+
+Actual `errors: []`; sets currencyUSD, quotedAt to machine import time, validUntil to `Date.now()+30days` (audit result2026-10-31). This claims a supplier-validity window never supplied, allowing these quotes to bypass the expiration gate. The initial audit asked to reject missing provenance. Require currency and valid_until (and truthfully distinguish provided quote date from import time), reject blank cells/absent columns, or explicitly model unknown validity and prevent approval until user enters it. Injected `now` is currently ignored when inventing these fields.
+
+### Remaining P2 — unsafe baseline aggregation and misleading error
+
+Two units at the individually safe `Number.MAX_SAFE_INTEGER` price: optimizer correctly excludes unsafe aggregate, but `singleVendorBaseline` still returns unsafe18014398509481982 without validation/aggregate guards. The infeasible reason incorrectly names deadline/stock/minimum, though the cause is cents exceeding supported precision. Numeric baseline helper should enforce the same safe arithmetic/domain and report that limit. This requires absurd demo prices and is not a seed blocker.
+
+### Remaining P2 — expiry feedback / direct-file hub documentation
+
+Approval/export guards safely return on expired quotes but offer no message; their buttons can look active and inert until recompute. Saved expired quotes silently reset to seed rather than showing why. Also README's claim that `hub/index.html` can be opened directly is still false: relative slug links have no app directories under `hub/`; the HTTP hub now works. Prefer documenting `npm run hub` or changing direct-file link behavior. CSV metadata now has quote provenance but still omits the full assumptions included in JSON.
+
+### Re-audit artifacts
+
+- `cart-audit-results-93be16af.json`: exact independent repro outcomes and React stale-import SSR proof.
+- `cart-hub-results-93be16af.json`: actual200/302 HTTP hub routes and owned-process shutdown evidence.
+- `cart-independent-audit.mjs` updated to load current modules and retain old initial results in `cart-audit-results.json`.
+- `cart-hub-audit.mjs`: bounded no-browser localhost hub test, refuses occupied port and never stops another process.
+
+---
+
+## Initial audit — retained historical findings (superseded by latest re-audit above)
+
 Audit date: October 1, 2026 (America/Toronto). Read-only application review of `output/ramp-review-cart`, commit `1090a66b46a11c14e26587cc39ba95ea3319b551`, against `SPEC-CART.md` and `BUILD-CONTRACT.md`. No application source or browser controls changed. `npm ci` and build created only dependencies/build artifacts; independent audit artifacts are in `output/ramp-handoff`.
 
 **Verdict: seed demonstration and typical optimizer math pass; repair the input-validation, order identity/zero-price, approval-expiry and local-suite integration issues before declaring the complete editable/importable flow done.**

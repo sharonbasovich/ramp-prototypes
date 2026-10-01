@@ -1,5 +1,82 @@
 # Independent audit: Pay Me Twice and Budget Brawl
 
+> **CURRENT VERDICT (final Pay a0b08c7): PASS for the reviewed upload, currency, provenance and concurrency criteria. Pay: 41/41 tests, typecheck and build pass. Budget: 35/35 local repair tests passed; root has subsequently merged it and verified the core SQLite/browser flows and compact viewports. Earlier findings below are historical and superseded by this banner and the final Pay evidence. No open Pay P1/P2 remains from this audit.**
+
+## Final Pay re-audit - a0b08c7
+
+Read-only checkout: `output/ramp-review-pay`, commit `a0b08c7be042d4f22bf1be866cfa0bb1737f1108`. Application files were not changed by this re-audit. The existing independent upload/API probes were extended in a separate handoff script and run against a temporary SQLite server.
+
+**Unstated currency now cannot pay, independently verified:** Both `Total 12.34` and `Total $12.34` upload as amount 1234 cents with a blank currency. A payment using either the returned blank currency or an omitted currency property returns `invalid` with "Currency is required" and leaves the payment ledger unchanged. Only deliberately supplying USD allows the exact $12.34 payment. Bare dollars no longer imply USD. Source inspection also confirms the currency selector has an empty placeholder, the upload notice identifies missing currency, and validation/payment readiness includes explicit currency.
+
+**Provenance correction verified:** In `src/App.tsx`, every supplier/reference/period/currency and amount edit uses the shared `factsSourceAfterEdit` function. Extracted or generated facts become `mixed`; existing manual records remain manual. The UI labels mixed facts "document + manual edits" and the engine evidence says "Document text + manual edits". An independent partial upload lacking amount/currency cannot pay; after deliberate $23.17/USD completion marked mixed, the ledger records exactly 2317 cents and the evidence explicitly discloses manual edits. This resolves the earlier false extracted-source label. Fine-grained per-field provenance is not implemented or claimed.
+
+**Core upload and concurrency checks still pass:** Independently supplied native and Flate-compressed PDFs both extract the literal source text, invoice NATIVE-812, October 2026, explicit USD and exactly 1725 cents. A missing reference remains invalid. Unreadable image bytes return `supported:false` and no fields; blank manual facts remain invalid. A fresh supplier/reference sent in a 20-way HTTP burst records one exact 2367-cent payment, blocks 19 duplicates, creates one matching ledger row and returns no non-200 status.
+
+**Validation:** `npm test` **41/41 pass** (27 engine tests, 14 acceptance tests); `npm run typecheck` and `npm run build` pass. Additional independent HTTP probes all pass. The temporary server and in-memory SQLite connection were closed in `finally`. No UI browser was opened, and the review checkout remains clean.
+
+**Evidence:** Reproducible script `output/ramp-handoff/reaudit-pay-a0b08c7.mjs`; captured outcomes `output/ramp-handoff/audit-pay-budget-artifacts/reaudit-pay-a0b08c7.json`. Prior defect reproductions are retained below as history rather than current blockers.
+
+**Latest Budget integration evidence from root:** Local fix commit `0e5e7b7` was pushed to existing PR 2 and merged; root additionally changed desktop max width from 1320px to 1500px. Root's in-app browser verification passed Launch/Approve/Commit/Replay in both SQLite and Browser modes, all core sections visible at 1536px, and horizontal-safe layouts at 1366px and 390px. The earlier statement awaiting visual verification is historical. A separate independent Opus review of Budget is still active; this report does not assume its outcome.
+
+## Latest Budget repair validation - local commit 0e5e7b7
+
+Budget is now locally hardened on `codex/budget-local-hardening`, commit `0e5e7b79eaf43c42e1bb814fd673166d43a397f2`, in `output/ramp-review-budget`. This section supersedes the original Budget findings below. Root authorized app-only implementation after the cloud builder hit capacity; the original auditor performed these repairs, so this is repair validation rather than a second independent implementation review. Nothing was pushed, and no root integration file or other app was changed.
+
+**All requested engine/API defects are repaired and covered by observable regressions:**
+
+- Expired holds are released inside the same transaction before placement, approval, and budget-capacity decisions. Independent HTTP tests now place a $60 hold, wait beyond its 500ms TTL without a GET, and successfully reserve the next $60 request. Another case approves an $80 pending request after a different hold expires, and lowering the budget succeeds only after expired holds are released. No intervening state read masks these cases.
+- Runtime budget, approval-threshold, catalog-price and claimed-price values are bounded safe integer cents, maximum 100,000,000 ($1 million). HTTP rejects `1e30`, values beyond JavaScript's safe-integer limit, 100,000,001 cents, fractions and negatives; persisted wallet values stay unchanged. Shared-engine testing confirms exact subtraction at the supported maximum. Malformed explicit seed wallet values now fail instead of silently becoming defaults.
+- Placement and lifecycle commands require their captured epoch. Missing epochs return `400 epoch_required`; stale epochs return `409 stale_epoch` before replay lookup or mutation. Engine, real HTTP and the actual TypeScript browser adapter reset the sandbox, reuse the same request ID, then reject all four old lifecycle commands and the old duplicate placement while preserving the fresh request/hold. Fresh-epoch operations remain functional.
+- Both backends expose the same `OpResponse` failure shape. A new direct browser-adapter test caught raw engine errors being returned without the UI's `error` object; configuration, price, placement and lifecycle errors now normalize to `{ok:false,error:{code,detail}}`.
+- The impact counter counts terminal `denied/insufficient_funds` requests only. Pending approval or funds have separate counts and sample amounts, and the interface explicitly says pending requests may still succeed and requested amounts are not realized savings.
+- Test teardown awaits the child server's close before deleting its validated test-owned temporary directory. The HTTP server also closes its SQLite handles on SIGTERM/SIGINT. Both successive complete test runs exited successfully on Windows, without the former EBUSY after-hook failure.
+
+**Compact layout changes (source reviewed; visual verification assigned to root):** Launch/replay controls appear before the lanes; the transaction ledger appears before collapsed advanced catalog/quote controls. Request/quantity share one row, the unused justification field is removed, numeric totals use tabular figures, desktop controls keep a minimum 40px target (44px on mobile), and lane summaries expose full detail in the ledger. The UI schedules one refresh at the next live quote expiry and synchronizes lane status from the refreshed snapshot. No continuous polling was added. Root must verify the final populated layout at 1536 and 1366 widths; no UI browser was used for this repair pass.
+
+**Validation:** `npm test` **35/35 pass**, including 19 real HTTP/SQLite tests, 13 engine tests and 3 tests of the bundled TypeScript browser adapter without a UI browser; `npm run typecheck` passes; `npm run build` passes; `git diff --check` passes. All temporary HTTP test servers exited and their test-owned SQLite directories were removed. The local worktree is clean after the commit.
+
+**Integration contract:** `POST /api/requests` requires `epoch` from the snapshot that originated the request. Every `POST /api/requests/:id/{approve,reject,commit,cancel}` requires `{epoch}` from that original request row/result, not an epoch freshly substituted after Reset. The browser adapter and UI follow the same contract. Root will publish the local commit to the existing PR after reviewing it.
+
+## Historical re-audit — Pay commit 2872c2e
+
+Pay's checkout is now `2872c2e3abb1c70e8eafb4426e0caa7cc8a2a6a5`. This section supersedes the original Pay verdict/findings below. Budget's later local repairs and validation are documented above.
+
+**Resolved in source and independently verified through the API:** the original P1 missing-upload-value retention and the P2 escaped-PDF-total extraction defect. The upload handler now builds a fresh record from extracted values, with missing supplier/reference/amount empty, and clears an unreadable scan's form. Payment and validation buttons are gated on the required facts. The engine independently rejects incomplete facts. Native and compressed versions of the original independent PDF now both extract `amountCents: 1725` and preserve `Total (USD) $17.25` in text. A deliberate manual completion records exactly $23.17 with manual-entry evidence. A new independent 20-request HTTP burst yields one payment and 19 duplicate blocks, with no 500s.
+
+**Resolved by source inspection:** uploaded readable documents now display their own extracted text rather than fabricated sample addresses, dates, tax and bill-to details. The manual period control is now a `type="month"` input, allowing arbitrary/current periods. Sample fixture dates have moved to 2026. UI execution of this fixed commit is left to root; no UI browser was used during this re-audit.
+
+**Validation:** 36/36 tests pass; typecheck passes; production build passes. Application source remains unchanged by the auditor. The temporary API server was closed. Evidence: `audit-pay-budget-artifacts/reaudit-pay-2872c2e.json`; reproducible script: `reaudit-pay-2872c2e.mjs`.
+
+### Historical P2 (resolved in a0b08c7) — An absent currency is invented as USD and can pay without confirmation
+
+**Locations:** `apps/pay-me-twice/engine/documents.mjs` total parsing, `engine/engine.mjs` normalizeFacts currency default, and `src/App.tsx` upload currency fallback.
+
+Independent upload:
+
+```text
+Supplier: Independent No Currency
+Invoice No.: NO-CUR-22
+Total 12.34
+```
+
+`POST /api/documents` returns `currency: 'USD'`, `amountCents: 1234`, and `factsSource: 'extracted'`, although the file has no currency symbol or code. `POST /api/pay` with those returned fields records a $12.34 USD payment. The UI considers the form complete, and its copy says unstated fields remain blank. This bypasses deliberate verification of a financially required fact.
+
+**Expected API behavior:** Extraction should preserve currency as unknown when the text does not explicitly identify it. Include currency in extraction provenance/found-field information. Normalization must not silently backfill USD for an uploaded/manual record with an unknown currency. Payment should return an invalid or review outcome until a valid currency has been explicitly supplied. Generated sample invoices already identify USD and can keep their existing smooth flow. A bare dollar symbol is not a unique currency code either; a regional assumption, if supported, must be disclosed and confirmed.
+
+**Expected UI behavior:** Show a blank/“Select currency” option and a clear “Currency not stated in this document” message. Disable payment until the user chooses/confirms it. Label that value as manually supplied, rather than extracted. An independent regression should assert missing currency cannot pay; after an explicit selection, the exact amount should pay with correct provenance.
+
+**Evidence:** `reaudit-pay-2872c2e.json`, result `currency-default-not-explicit-in-upload`.
+
+### Historical P2 (resolved in a0b08c7) — Manual completion/edits of extracted facts stay labeled extracted
+
+**Location:** `apps/pay-me-twice/src/App.tsx`, `onFactsChange` and `onAmountChange` handlers.
+
+Both preserve `factsSource: 'extracted'` whenever the previous record was extracted. Consequently, typing the missing amount from an incomplete document still leaves the form labeled “extracted from document,” and the payment API receives the wrong source label. The corrected missing-value gate prevents accidental sample amounts, but the evidence cannot distinguish the user's completion from the parser's work.
+
+**Expected:** Track source per field, or at minimum mark an edited/completed record manual/mixed and disclose which facts were typed. Manual confirmation should not falsely elevate an unreadable or unparsed value into verified extraction. Root has already sent this provenance fix to the builder; this audit does not mark it repaired until the new commit is inspected.
+
+## Original audit — historical evidence
+
 Audit completed against these read-only review checkouts:
 
 - Pay Me Twice: `output/ramp-review-pay`, commit `2ef72e2c77e8366be51d96dbf80660f567a64502`.

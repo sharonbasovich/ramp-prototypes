@@ -100,8 +100,8 @@ body {
 }
 .amount-row { display: flex; gap: 6px; }
 .amount-row select { width: 76px; flex: none; }
-.period-row { display: flex; gap: 8px; align-items: center; }
-.period-row input[type='month'] { flex: 1; min-width: 0; }
+.period-row { display: flex; gap: 4px 8px; align-items: center; flex-wrap: wrap; }
+.period-row input[type='month'] { flex: 1; min-width: 150px; }
 .period-none {
   display: flex; align-items: center; gap: 4px; flex: none;
   font-size: 11px; color: var(--muted); white-space: nowrap;
