@@ -10,14 +10,28 @@ export function SummaryCard(props: {
   busy: boolean;
 }) {
   const t = props.totals;
+  const allDone = t.estimatedRefundableMinor === 0 && t.packetRefundableMinor > 0;
+  const confirmed = t.confirmedCancellations ?? 0;
+  const queued = t.queuedCancellations ?? 0;
+  const failed = t.failedCancellations ?? 0;
+  const confirmText =
+    confirmed === 0
+      ? `0${queued ? ` — ${queued} approved, not yet run` : ''}`
+      : `${confirmed}${queued ? ` confirmed, ${queued} queued` : ' confirmed'}${failed ? `, ${failed} failed` : ''}`;
   return (
     <section className="card summary-card" aria-label="Cancellation summary">
       <h2>Cancellation summary</h2>
       <dl className="summary-rows">
         <div className="summary-row">
-          <dt>Estimated refundable</dt>
+          <dt>Refundable if canceled now</dt>
           <dd className="big">{fmtMoney(t.estimatedRefundableMinor)}</dd>
         </div>
+        {allDone && (
+          <div className="summary-row">
+            <dt className="cell-sub dim">Remaining potential is $0 — reviewed bookings already confirmed.</dt>
+            <dd />
+          </div>
+        )}
         <div className="summary-row">
           <dt>Future charges avoided</dt>
           <dd>{fmtMoney(t.estimatedFutureChargesAvoidedMinor)}</dd>
@@ -31,11 +45,15 @@ export function SummaryCard(props: {
           <dd>{fmtMoney(t.netEstimatedBenefitMinor)}</dd>
         </div>
       </dl>
-      <p className="cell-sub dim">Amounts may change based on provider confirmations.</p>
+      <p className="cell-sub dim">Remaining-potential figures count only still-active bookings.</p>
       <dl className="summary-rows confirmed">
         <div className="summary-row">
-          <dt>Provider-confirmed cancellations</dt>
-          <dd>{t.outcomeCount > 0 ? 'recorded below' : '0'}</dd>
+          <dt>Approved packet estimate</dt>
+          <dd>{fmtMoney(t.packetRefundableMinor)}</dd>
+        </div>
+        <div className="summary-row">
+          <dt>Cancellations (simulated)</dt>
+          <dd>{confirmText}</dd>
         </div>
         <div className="summary-row">
           <dt>Refunds due (estimated)</dt>

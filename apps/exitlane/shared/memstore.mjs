@@ -121,7 +121,26 @@ export function createMemStore(seed = DEFAULT_SEED) {
     },
     restore(json) {
       const parsed = JSON.parse(json);
+      // Validate persisted shape before adopting it — valid JSON with a
+      // corrupted/partial schema must not crash or silently corrupt state;
+      // fall back to the fresh seeded state instead.
+      const valid =
+        parsed &&
+        typeof parsed === 'object' &&
+        Number.isInteger(parsed.epoch) &&
+        Number.isFinite(parsed.clockMs) &&
+        Array.isArray(parsed.bookings) &&
+        Array.isArray(parsed.policies) &&
+        parsed.event &&
+        typeof parsed.event === 'object' &&
+        Array.isArray(parsed.requests) &&
+        Array.isArray(parsed.outcomes) &&
+        Array.isArray(parsed.events) &&
+        parsed.providers &&
+        typeof parsed.providers === 'object';
+      if (!valid) return false;
       Object.assign(state, parsed);
+      return true;
     },
   };
   return store;

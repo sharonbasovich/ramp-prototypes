@@ -180,4 +180,25 @@ server.listen(PORT, () => {
   console.log(`Static SPA served from ${DIST} (also under ${BASE_PREFIX}/)`);
 });
 
+// Graceful shutdown: stop accepting, drain, close the sqlite handle so the
+// DB file is released before the process exits (Windows EBUSY safety).
+function shutdown() {
+  server.close(() => {
+    try {
+      store.close?.();
+    } finally {
+      process.exit(0);
+    }
+  });
+  setTimeout(() => {
+    try {
+      store.close?.();
+    } finally {
+      process.exit(0);
+    }
+  }, 2000).unref();
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+
 export { server, store };

@@ -32,3 +32,29 @@
   UTC + Toronto cutoff, request history, provider attempts) the spec requires.
 - Mobile (<560px): toolbar wraps, cards stack, the bookings table scrolls
   horizontally inside its container; zero page-level overflow.
+- Compaction pass (root visual audit): content widened toward the concept's
+  ~1472px band, header/hero/toolbar/timeline/table rows/summary compacted,
+  toolbar kept to one horizontal strip (timezone and clock controls wrap below
+  it at narrow widths), and the Activity log moved into a collapsed
+  `<details>` so all five bookings plus the summary and approval controls fit
+  a 1536x1024 viewport.
+
+## Measured geometry (post-compaction, emulated viewports)
+
+| Metric | Concept | 1536x1024 actual | 1366x768 actual |
+| --- | --- | --- | --- |
+| Content band | x32, w1472 | x32→1489, w1457 (native 15px v-scrollbar; w1472 without it) | x32→1334 |
+| Toolbar | single horizontal strip | single strip, y176–234, all controls on one row | single strip |
+| Timeline card top | y272 | y248 (~24px higher — tighter header) | y293 |
+| Bookings table bottom | y878 | y945 — all 5 rows above the fold | rows 1–2 fully visible; Equipment+ below fold (scrollH 1216) |
+| Summary card | visible | y248–709, fully above fold | y293–755, fully above fold |
+| Below fold | — | evidence banner, footer (~128px) | Equipment row bottom, Shuttle+Decor rows, confirmations, activity, banner, footer |
+
+Mobile 390px: `docScrollW === innerWidth` — zero page-level overflow; only
+internal horizontal scrollers (table wrap, one timeline label).
+
+Screenshots: `docs/screenshots/desktop-initial.png` (exactly 1536x1024),
+`desktop-1366.png` (exactly 1366x768), `mobile-initial.png` (390px @2x),
+plus `desktop-packet-executed.png` / `desktop-stale.png` /
+`desktop-failure-retry.png` / `desktop-booking-details.png` /
+`desktop-clock-advanced.png` state shots.
