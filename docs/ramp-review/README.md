@@ -6,7 +6,7 @@ This is a review-only branch. No app code was changed and no builder fixes are d
 |---|---|---|---|---|
 | Cart Tetris (+ root runner) | `codex/cart-tetris` PR1 | `1090a66` | **`b09cc5a`** | 5311 |
 | Budget Brawl | `codex/budget-brawl` PR2 | `32468be` | `32468be` (no repaired head pushed yet) | 5314 |
-| BorrowFirst | `codex/borrowfirst` PR3 | `e2942ab` | **`ef0ad26`** | 5313 |
+| BorrowFirst | `codex/borrowfirst` PR3 | `e2942ab` | **`df48f9e`** | 5313 |
 | Pay Me Twice | `codex/pay-me-twice` PR4 | `2ef72e2` | **`a0b08c7`** | 5312 |
 | ExitLane | `codex/exitlane` | — | **`31bc5d0`** | 5315 |
 
@@ -16,7 +16,7 @@ This is a review-only branch. No app code was changed and no builder fixes are d
 |---|---|---|---|---|---|
 | Cart `b09cc5a` | ok | 46/46, plus my 2-test independent oracle = 48/48 | ok | ok | sqlite |
 | Pay `a0b08c7` | ok | 41/41 | ok | ok | sqlite |
-| Borrow `ef0ad26` | ok | 43/43 | ok | ok | sqlite |
+| Borrow `df48f9e` | ok | 47/47 | ok | ok | sqlite |
 | Budget `32468be` | ok | 21/21 | ok | ok | sqlite |
 | Exit `31bc5d0` | ok | 32/32 (`node --test`) | ok | ok | sqlite |
 
