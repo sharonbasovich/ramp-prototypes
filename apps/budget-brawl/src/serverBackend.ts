@@ -33,8 +33,8 @@ export function serverBackend(): BackendApi {
     placeRequest(req) {
       return call<RequestResult>('/api/requests', req);
     },
-    act(requestId, action) {
-      return call<RequestResult>(`/api/requests/${encodeURIComponent(requestId)}/${action}`, {});
+    act(requestId, action, epoch) {
+      return call<RequestResult>(`/api/requests/${encodeURIComponent(requestId)}/${action}`, { epoch });
     },
   };
 }

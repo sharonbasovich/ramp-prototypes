@@ -4,8 +4,8 @@
 
 A working prototype for Sharon's private Ramp event: three agent lanes fire
 purchase requests at a shared wallet while the wallet enforces
-`spent + reserved <= budget` in real time — under real concurrency, not in a
-mock.
+`spent + reserved <= budget`. The local SQLite server handles real concurrent
+HTTP requests; the static public demo is explicitly a single-tab browser sandbox.
 
 > Demo data only. Simulated marketplace, scripted agents, no real purchases,
 > no Ramp integration, no real payments or card issuance.
@@ -16,7 +16,7 @@ mock.
 npm ci
 npm run build
 npm start          # http://localhost:5314  (SPA + same-origin /api)
-npm test           # node:test — 21 tests, incl. real concurrent HTTP
+npm test           # node:test — 35 tests, incl. real concurrent HTTP
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -46,12 +46,18 @@ persists to `node:sqlite` at `.data/budget-brawl.sqlite` (created on first run).
   her permission scope, *not* because of any amount threshold. Scopes are
   immutable at request time.
 - **Quote timeout + change recheck** — every request stores a quoted price
-  with a TTL. Expired quotes release their hold; if the catalog price moved,
+  with a TTL. Expired quotes release their hold before new reservations,
+  approval, or budget changes decide available capacity (no GET required).
+  The UI refreshes at the next expiry. If the catalog price moved,
   the commit is refused as stale (funds released, never charged the old price).
-- **Reset** — deterministic reset bumps the epoch; request IDs from a dead
-  epoch get a clean 404 and cannot mutate the new wallet.
-- **Impact counter** — reports requests prevented from reserving over budget
-  and their *sample* requested amounts (explicitly not realized savings).
+- **Reset** — deterministic reset bumps the epoch. Commands carry the epoch
+  captured with their request: an old command gets `409 stale_epoch`, even
+  when its request ID is reused in the new sandbox. Missing epochs get 400.
+- **Impact counter** — terminal budget denials and pending approval/funds
+  are reported separately. Pending requests may still succeed; requested
+  sample amounts are explicitly not realized savings.
+- **Safe money bounds** — budget, threshold and unit prices accept integer
+  cents from 0 through 100,000,000 ($1 million), preserving exact arithmetic.
 
 ## Modes (shown on-screen at all times)
 
@@ -69,8 +75,12 @@ persists to `node:sqlite` at `.data/budget-brawl.sqlite` (created on first run).
 | `POST /api/reset` | reseed; optional `{config}` body imports a custom wallet/catalog/agents (used by tests) |
 | `POST /api/config` | edit budgetMinor / approvalThresholdMinor / quoteTtlMs (budget can't drop below commitments) |
 | `POST /api/catalog/price` | edit a sample catalog price (open quotes keep their quoted price) |
-| `POST /api/requests` | `{requestId, agentId, itemId, qty, claimedPriceMinor?}` → reserve / pending / denied |
-| `POST /api/requests/:id/{approve,reject,commit,cancel}` | lifecycle transitions, all idempotent |
+| `POST /api/requests` | `{epoch, requestId, agentId, itemId, qty, claimedPriceMinor?}` → reserve / pending / denied |
+| `POST /api/requests/:id/{approve,reject,commit,cancel}` | `{epoch}` from the original row; lifecycle transitions with replay protection |
+
+Read the epoch from `/api/state` when creating a request, and keep that
+request's returned epoch for its later actions. Never replace an old
+command's epoch with a freshly fetched one after reset.
 
 ## Layout
 
@@ -96,10 +106,15 @@ tests/                independent acceptance (HTTP) + engine unit tests
 
 ## Testing evidence
 
-`npm test` → **21/21 pass**, including: 20-way reservation race (exactly one
+`npm test` → **35/35 pass**, including: 20-way reservation race (exactly one
 hold), reserve→commit conservation, replayed purchase (same purchase ID),
 double-cancel (funds once), forged-price rejection, invalid quantity matrix,
 approval-under-scarcity (cannot overspend), expired + stale quotes,
 commit/cancel race (one terminal transition), permission denial, epoch reset
-isolation, and a 30-request invariant storm. Browser-run flow evidence is in
-`docs/screenshots/`.
+isolation with reused IDs, safe money bounds, mutation-time expiry without
+GET, truthful pending counts, and a 30-request invariant storm. Direct
+TypeScript browser-adapter tests cover expiry, stale epochs and consistent
+error responses without a UI browser. Test teardown awaits the server's
+exit before removing its temporary SQLite files on Windows. Earlier
+browser-run flow evidence is in `docs/screenshots/`; the compact revised
+layout still needs root's visual verification at 1536/1366 widths.

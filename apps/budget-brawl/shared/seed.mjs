@@ -41,7 +41,7 @@ const LIMITS = {
 };
 
 function isInt(v) {
-  return typeof v === 'number' && Number.isInteger(v);
+  return typeof v === 'number' && Number.isSafeInteger(v);
 }
 
 /**
@@ -52,6 +52,11 @@ function isInt(v) {
 export function buildSeed(input) {
   const src = input && typeof input === 'object' ? input : {};
   const w = src.wallet ?? {};
+  for (const field of ['budgetMinor', 'approvalThresholdMinor', 'quoteTtlMs']) {
+    if (w[field] !== undefined && !isInt(w[field])) {
+      return { ok: false, error: `${field} must be a safe integer` };
+    }
+  }
   const wallet = {
     budgetMinor: isInt(w.budgetMinor) ? w.budgetMinor : DEFAULT_SEED.wallet.budgetMinor,
     approvalThresholdMinor: isInt(w.approvalThresholdMinor)

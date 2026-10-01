@@ -22,6 +22,7 @@ export interface AgentInfo {
 }
 
 export interface RequestRow {
+  epoch: number;
   requestId: string;
   agentId: string;
   itemId: string;
@@ -81,10 +82,11 @@ export interface Snapshot {
   requests: RequestRow[];
   purchases: PurchaseRow[];
   events: EventRow[];
-  impact: { preventedCount: number; preventedAmountMinor: number; note: string };
+  impact: { preventedCount: number; preventedAmountMinor: number; pendingCount: number; pendingAmountMinor: number; note: string };
 }
 
 export interface RequestResult {
+  epoch: number;
   requestId: string;
   agentId: string;
   itemId: string;
@@ -100,6 +102,7 @@ export interface RequestResult {
   purchaseId: string | null;
   detail: string;
   replayed: boolean;
+  quoteExpiresAt: number | null;
   totals: Totals;
 }
 
@@ -131,6 +134,7 @@ export interface BackendApi {
   }): Promise<OpResponse>;
   setCatalogPrice(itemId: string, priceMinor: number): Promise<OpResponse>;
   placeRequest(req: {
+    epoch: number;
     requestId: string;
     agentId: string;
     itemId: string;
@@ -140,5 +144,6 @@ export interface BackendApi {
   act(
     requestId: string,
     action: 'approve' | 'reject' | 'commit' | 'cancel',
+    epoch: number,
   ): Promise<OpResponse<RequestResult>>;
 }

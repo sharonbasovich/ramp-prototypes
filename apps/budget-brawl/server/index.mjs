@@ -8,7 +8,7 @@ import { join, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createSqlStore } from './sqlstore.mjs';
 import * as engine from '../shared/engine.mjs';
-import { buildSeed, DEFAULT_SEED } from '../shared/seed.mjs';
+import { buildSeed } from '../shared/seed.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DIST = join(ROOT, 'dist');
@@ -132,7 +132,8 @@ const server = http.createServer(async (req, res) => {
         : action === 'reject' ? engine.rejectRequest
         : action === 'commit' ? engine.commitRequest
         : engine.cancelRequest;
-      sendOp(res, op(store, decodeURIComponent(requestId), now()));
+      const body = await readBody(req);
+      sendOp(res, op(store, decodeURIComponent(requestId), now(), body?.epoch));
       return;
     }
     if (path.startsWith('/api/')) {
@@ -153,5 +154,19 @@ server.listen(PORT, () => {
   console.log(`Budget Brawl sandbox (SQLite backend) on http://localhost:${PORT}`);
   console.log(`Static SPA served from ${DIST} (also under ${BASE_PREFIX}/)`);
 });
+
+// Release SQLite/WAL handles before process exit (important on Windows).
+let shuttingDown = false;
+function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  server.close(() => {
+    store.close();
+    process.exit(0);
+  });
+  server.closeIdleConnections();
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 export { server, store };

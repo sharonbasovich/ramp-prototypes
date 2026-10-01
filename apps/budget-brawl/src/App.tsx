@@ -31,7 +31,6 @@ const CHIP_TITLE: Record<string, string> = {
 interface LaneForm {
   itemId: string;
   qty: number;
-  justification: string;
 }
 
 interface LaneState extends LaneForm {
@@ -40,9 +39,9 @@ interface LaneState extends LaneForm {
 }
 
 const DEFAULT_FORMS: Record<string, LaneForm> = {
-  ada: { itemId: 'monitor', qty: 1, justification: 'Need a monitor for development work.' },
-  ben: { itemId: 'monitor', qty: 1, justification: 'Need a monitor for pair programming.' },
-  cleo: { itemId: 'gadget', qty: 1, justification: 'High-end gadget for a research project.' },
+  ada: { itemId: 'monitor', qty: 1 },
+  ben: { itemId: 'monitor', qty: 1 },
+  cleo: { itemId: 'gadget', qty: 1 },
 };
 
 export default function App() {
@@ -61,6 +60,10 @@ export default function App() {
     if (!bk) return;
     const s = await bk.state();
     setSnap(s);
+    setLanes((prev) => Object.fromEntries(Object.entries(prev).map(([id, lane]) => {
+      const current = s.requests.find((r) => r.requestId === lane.last?.requestId && r.epoch === lane.last?.epoch);
+      return [id, { ...lane, last: current && lane.last ? { ...lane.last, ...current, totals: s.totals } : null }];
+    })));
     setBudgetText((s.wallet.budgetMinor / 100).toString());
     setThresholdText((s.wallet.approvalThresholdMinor / 100).toString());
     setTtlText((s.wallet.quoteTtlMs / 1000).toString());
@@ -86,7 +89,6 @@ export default function App() {
               ...(DEFAULT_FORMS[a.agentId] ?? {
                 itemId: a.permissions[0] ?? s.catalog[0]?.itemId ?? '',
                 qty: 1,
-                justification: '',
               }),
               last: null,
               busy: false,
@@ -112,15 +114,28 @@ export default function App() {
     setNotice({ kind: 'error', text: msg });
   }, []);
 
+  // Refresh once at the next live quote deadline. No continuous polling is
+  // needed, and an idle UI must not keep displaying money as reserved forever.
+  useEffect(() => {
+    const deadlines = snap?.requests
+      .filter((r) => ['reserved', 'awaiting_approval', 'awaiting_funds'].includes(r.status))
+      .map((r) => r.quoteExpiresAt)
+      .filter((n): n is number => n !== null) ?? [];
+    if (!deadlines.length) return;
+    const timer = window.setTimeout(() => void refresh().catch(reportError), Math.max(20, Math.min(...deadlines) - Date.now() + 20));
+    return () => window.clearTimeout(timer);
+  }, [snap, refresh, reportError]);
+
   const sendLaneRequest = useCallback(
     async (agentId: string) => {
-      if (!backend) return;
+      if (!backend || !snap) return;
       const lane = lanes[agentId];
       if (!lane) return;
       const requestId = newRequestId();
       lastRequestId.current = requestId;
       setLane(agentId, { busy: true });
       const r = await backend.placeRequest({
+        epoch: snap.epoch,
         requestId,
         agentId,
         itemId: lane.itemId,
@@ -134,7 +149,7 @@ export default function App() {
       setLane(agentId, { busy: false, last: r.result });
       await refresh();
     },
-    [backend, lanes, refresh, reportError, setLane],
+    [backend, snap, lanes, refresh, reportError, setLane],
   );
 
   const launchAll = useCallback(async () => {
@@ -149,6 +164,7 @@ export default function App() {
         const requestId = newRequestId();
         lastRequestId.current = requestId;
         const r = await backend.placeRequest({
+          epoch: snap.epoch,
           requestId,
           agentId: a.agentId,
           itemId: lane.itemId,
@@ -164,9 +180,9 @@ export default function App() {
   }, [backend, snap, lanes, refresh, setLane]);
 
   const doAction = useCallback(
-    async (requestId: string, action: 'approve' | 'reject' | 'commit' | 'cancel') => {
+    async (requestId: string, action: 'approve' | 'reject' | 'commit' | 'cancel', epoch: number) => {
       if (!backend) return;
-      const r = await backend.act(requestId, action);
+      const r = await backend.act(requestId, action, epoch);
       if (!r.ok) {
         reportError(r);
       } else {
@@ -183,12 +199,13 @@ export default function App() {
   );
 
   const replay = useCallback(
-    async (requestId?: string) => {
-      const id = requestId ?? lastRequestId.current;
-      if (!backend || !id) return;
-      const prior = snap?.requests.find((r) => r.requestId === id);
+    async (request?: RequestRow) => {
+      if (!backend) return;
+      const prior = request ?? snap?.requests.find((r) => r.requestId === lastRequestId.current);
       if (!prior) return;
+      const id = prior.requestId;
       const r = await backend.placeRequest({
+        epoch: prior.epoch,
         requestId: id,
         agentId: prior.agentId,
         itemId: prior.itemId,
@@ -254,7 +271,7 @@ export default function App() {
         Object.entries(prev).map(([k, v]) => [
           k,
           {
-            ...(DEFAULT_FORMS[k] ?? { itemId: v.itemId, qty: v.qty, justification: '' }),
+            ...(DEFAULT_FORMS[k] ?? { itemId: v.itemId, qty: v.qty }),
             last: null,
             busy: false,
           },
@@ -341,17 +358,6 @@ export default function App() {
               onKeyDown={(e) => e.key === 'Enter' && applyConfig()}
             />
           </div>
-          <div className="field">
-            <label htmlFor="ttl-input">Quote TTL (s)</label>
-            <input
-              id="ttl-input"
-              inputMode="decimal"
-              value={ttlText}
-              onChange={(e) => setTtlText(e.target.value)}
-              onBlur={applyConfig}
-              onKeyDown={(e) => e.key === 'Enter' && applyConfig()}
-            />
-          </div>
         </div>
         <div className="stats">
           <div className="stat">
@@ -393,13 +399,29 @@ export default function App() {
           </div>
         </div>
         <div className="impact-line">
-          <strong>Prevented over-budget requests: {snap.impact.preventedCount}</strong>
+          <strong>Denied for budget: {snap.impact.preventedCount}</strong>
           {snap.impact.preventedCount > 0 &&
             ` — sample requested amounts ${fmtMoney(snap.impact.preventedAmountMinor)}`}
+          {' · '}
+          Pending approval or funds: {snap.impact.pendingCount}
           {' · '}
           {snap.impact.note}
         </div>
       </section>
+
+      <div className="actions-row">
+        <button className="btn primary" onClick={() => void launchAll()} disabled={launching}>
+          ▶ Launch simultaneous requests
+        </button>
+        <button
+          className="btn"
+          onClick={() => void replay()}
+          disabled={!lastRequestId.current && !snap.requests.length}
+        >
+          ↻ Replay duplicate request
+        </button>
+        {notice && <div className={`notice ${notice.kind === 'error' ? 'error' : ''}`}>{notice.text}</div>}
+      </div>
 
       <section className="lanes">
         {snap.agents.map((agent) => {
@@ -416,6 +438,7 @@ export default function App() {
                   <div className="role">{agent.lane} · scripted agent</div>
                 </div>
               </div>
+              <div className="request-fields">
               <div className="field">
                 <label htmlFor={`item-${agent.agentId}`}>Request</label>
                 <select
@@ -431,11 +454,6 @@ export default function App() {
                   ))}
                 </select>
               </div>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <div className="field" style={{ flex: 1 }}>
-                  <label htmlFor={`price-${agent.agentId}`}>Price</label>
-                  <input id={`price-${agent.agentId}`} value={item ? fmtMoney(item.priceMinor) : '—'} readOnly />
-                </div>
                 <div className="field">
                   <label htmlFor={`qty-${agent.agentId}`}>Qty</label>
                   <input
@@ -453,16 +471,8 @@ export default function App() {
                 </div>
               </div>
               <div className="price-hint">
-                Catalog is authoritative — agents cannot claim a price.
-                {permitted ? '' : ' Not in this agent’s permission scope.'}
-              </div>
-              <div className="field">
-                <label htmlFor={`just-${agent.agentId}`}>Justification</label>
-                <textarea
-                  id={`just-${agent.agentId}`}
-                  value={lane.justification}
-                  onChange={(e) => setLane(agent.agentId, { justification: e.target.value })}
-                />
+                {item ? fmtMoney(item.priceMinor) : '—'} each · authoritative catalog
+                {permitted ? '' : ' · Outside permission scope'}
               </div>
               {lane.last ? (
                 <div className={`status-chip ${lane.last.status}`}>
@@ -472,7 +482,7 @@ export default function App() {
                       {CHIP_TITLE[lane.last.status]}
                       {lane.last.replayed ? ' (replayed)' : ''}
                     </div>
-                    <div className="chip-detail">{lane.last.detail}</div>
+                    <div className="chip-detail" title={lane.last.detail}>{lane.last.detail}</div>
                   </div>
                 </div>
               ) : (
@@ -496,22 +506,53 @@ export default function App() {
         })}
       </section>
 
-      <div className="actions-row">
-        <button className="btn primary" onClick={() => void launchAll()} disabled={launching}>
-          ▶ Launch simultaneous requests
-        </button>
-        <button
-          className="btn"
-          onClick={() => void replay()}
-          disabled={!lastRequestId.current && !snap.requests.length}
-        >
-          ↻ Replay duplicate request
-        </button>
-        {notice && <div className={`notice ${notice.kind === 'error' ? 'error' : ''}`}>{notice.text}</div>}
-      </div>
+      <section className="timeline">
+        <div className="timeline-head">
+          <h2>Transaction timeline</h2>
+          <span className="invariant-note">Spent + reserved never exceeds budget.</span>
+        </div>
+        {snap.requests.length === 0 ? (
+          <p className="empty-note">
+            No requests yet. Launch the three scripted agents to watch the shared budget arbitrate.
+          </p>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Request ID</th>
+                  <th>Agent</th>
+                  <th>Item</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                  <th>Details</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {snap.requests.map((r) => (
+                  <TimelineRow
+                    key={`${r.epoch}-${r.requestId}`}
+                    r={r}
+                    onAction={doAction}
+                    onReplay={replay}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <details className="catalog-details">
-        <summary>Sample catalog — editable prices (authoritative for new requests)</summary>
+        <summary>Sandbox controls — quote expiry and editable catalog</summary>
+        <div className="field ttl-field">
+          <label htmlFor="ttl-input">Quote TTL (seconds, 0.5–3600)</label>
+          <input id="ttl-input" inputMode="decimal" value={ttlText}
+            onChange={(e) => setTtlText(e.target.value)} onBlur={applyConfig}
+            onKeyDown={(e) => e.key === 'Enter' && applyConfig()} />
+        </div>
         <table className="catalog-table">
           <thead>
             <tr>
@@ -551,45 +592,6 @@ export default function App() {
         </table>
       </details>
 
-      <section className="timeline">
-        <div className="timeline-head">
-          <h2>Transaction timeline</h2>
-          <span className="invariant-note">Spent + reserved never exceeds budget.</span>
-        </div>
-        {snap.requests.length === 0 ? (
-          <p className="empty-note">
-            No requests yet. Launch the three scripted agents to watch the shared budget arbitrate.
-          </p>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Request ID</th>
-                  <th>Agent</th>
-                  <th>Item</th>
-                  <th>Amount</th>
-                  <th>Status</th>
-                  <th>Details</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {snap.requests.map((r) => (
-                  <TimelineRow
-                    key={r.requestId}
-                    r={r}
-                    onAction={doAction}
-                    onReplay={replay}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
       <footer className="footer">
         <span>Scripted agents. Simulated marketplace. Real budget enforcement.</span>
         <span>Demo data. No real purchases.</span>
@@ -604,43 +606,43 @@ function TimelineRow({
   onReplay,
 }: {
   r: RequestRow;
-  onAction: (id: string, a: 'approve' | 'reject' | 'commit' | 'cancel') => Promise<void>;
-  onReplay: (id: string) => Promise<void>;
+  onAction: (id: string, a: 'approve' | 'reject' | 'commit' | 'cancel', epoch: number) => Promise<void>;
+  onReplay: (request: RequestRow) => Promise<void>;
 }) {
   const actions: JSX.Element[] = [];
   if (r.status === 'reserved') {
     actions.push(
-      <button key="c" className="btn small" onClick={() => void onAction(r.requestId, 'commit')}>
+      <button key="c" className="btn small" onClick={() => void onAction(r.requestId, 'commit', r.epoch)}>
         Commit
       </button>,
-      <button key="x" className="btn small danger" onClick={() => void onAction(r.requestId, 'cancel')}>
+      <button key="x" className="btn small danger" onClick={() => void onAction(r.requestId, 'cancel', r.epoch)}>
         Cancel
       </button>,
     );
   } else if (r.status === 'awaiting_approval') {
     actions.push(
-      <button key="a" className="btn small" onClick={() => void onAction(r.requestId, 'approve')}>
+      <button key="a" className="btn small" onClick={() => void onAction(r.requestId, 'approve', r.epoch)}>
         Approve
       </button>,
-      <button key="j" className="btn small danger" onClick={() => void onAction(r.requestId, 'reject')}>
+      <button key="j" className="btn small danger" onClick={() => void onAction(r.requestId, 'reject', r.epoch)}>
         Reject
       </button>,
-      <button key="x" className="btn small" onClick={() => void onAction(r.requestId, 'cancel')}>
+      <button key="x" className="btn small" onClick={() => void onAction(r.requestId, 'cancel', r.epoch)}>
         Cancel
       </button>,
     );
   } else if (r.status === 'awaiting_funds') {
     actions.push(
-      <button key="a" className="btn small" onClick={() => void onAction(r.requestId, 'approve')}>
+      <button key="a" className="btn small" onClick={() => void onAction(r.requestId, 'approve', r.epoch)}>
         Retry reserve
       </button>,
-      <button key="x" className="btn small danger" onClick={() => void onAction(r.requestId, 'cancel')}>
+      <button key="x" className="btn small danger" onClick={() => void onAction(r.requestId, 'cancel', r.epoch)}>
         Withdraw
       </button>,
     );
   } else {
     actions.push(
-      <button key="r" className="btn small" onClick={() => void onReplay(r.requestId)}>
+      <button key="r" className="btn small" onClick={() => void onReplay(r)}>
         Replay
       </button>,
     );
