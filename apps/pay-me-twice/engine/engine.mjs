@@ -11,8 +11,8 @@ export const DEFAULT_CURRENCY = 'USD';
 
 // Explicit fixture clock. The sandbox never uses wall-clock dates for invoice
 // data; each recorded attempt advances the fixture by one minute so the demo
-// ledger reads Sep 3, 2024 10:14 AM, 10:15 AM, ... like the design concept.
-export const FIXTURE_BASE_MS = Date.UTC(2024, 8, 3, 14, 14, 0); // 10:14 AM EDT
+// ledger reads Sep 3, 2026 10:14 AM, 10:15 AM, ... like the design concept.
+export const FIXTURE_BASE_MS = Date.UTC(2026, 8, 3, 14, 14, 0); // 10:14 AM EDT
 const MINUTE_MS = 60_000;
 
 export const MONTH_NAMES = [

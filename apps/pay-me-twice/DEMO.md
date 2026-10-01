@@ -12,7 +12,7 @@ Setup: `npm ci && npm run build && npm start` → http://localhost:5312
    **Inspect evidence** to show the content hash and normalized identity.
    "Identical bytes — the rename didn't matter."
 4. **20–26s** — Click **Reset sandbox**, choose **Next month's real bill**
-   (INV-1043, October 2024), validate → **Clear to pay**. Then pick
+   (INV-1043, October 2026), validate → **Clear to pay**. Then pick
    **Send 10 requests at once**: exactly **1 of 10** concurrent requests
    records a payment; 9 are blocked as duplicates.
 5. **26–30s** — Ledger shows both legitimate payments. "October paid once,

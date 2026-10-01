@@ -7,17 +7,32 @@ interface Doc {
   bytes: Uint8Array;
   readable: boolean;
   text: string;
+  kind: 'sample' | 'upload';
 }
 
 /** Paper-style render of the invoice under test — "as received". */
 export default function InvoiceDocumentCard({ doc, facts }: { doc: Doc | null; facts: InvoiceFacts }) {
+  const isUpload = doc?.kind === 'upload';
   return (
     <section className="card doc-card" aria-labelledby="doc-h">
       <div className="doc-head">
         <h2 id="doc-h">Invoice <span className="muted">(as received)</span></h2>
         <span className="doc-filename" title={doc?.filename}>{doc?.filename ?? '—'}</span>
       </div>
-      {doc && !doc.readable ? (
+      {isUpload && doc.readable ? (
+        // Uploads render their own extracted text — the paper template would
+        // otherwise fabricate an address, bill-to, dates and tax the file
+        // never stated.
+        <>
+          <div className="paper">
+            <pre className="paper-text">{doc.text || '(no extracted text)'}</pre>
+          </div>
+          <p className="doc-origin muted small">
+            Original text extracted from {doc.filename}. Fields it does not
+            state are left blank in the form — nothing is filled in for it.
+          </p>
+        </>
+      ) : doc && !doc.readable ? (
         <div className="paper paper-empty">
           <p className="paper-empty-icon" aria-hidden="true">▦</p>
           <p><strong>No readable text in this document.</strong></p>
@@ -70,12 +85,6 @@ export default function InvoiceDocumentCard({ doc, facts }: { doc: Doc | null; f
           </div>
           <p className="paper-thanks">Thank you for your business.</p>
         </div>
-      )}
-      {doc?.text && (
-        <details className="doc-text">
-          <summary>Extracted document text</summary>
-          <pre>{doc.text}</pre>
-        </details>
       )}
     </section>
   );

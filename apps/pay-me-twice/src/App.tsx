@@ -19,6 +19,7 @@ interface CurrentDoc {
   bytes: Uint8Array;
   readable: boolean;
   text: string;
+  kind: 'sample' | 'upload';
 }
 
 export default function App() {
@@ -50,7 +51,7 @@ export default function App() {
       setAdapter(ad);
       await refresh(ad);
       const canonical = buildScenarioDocument('renamed', facts);
-      setDoc({ filename: canonical.filename, bytes: canonical.bytes, readable: true, text: '' });
+      setDoc({ filename: canonical.filename, bytes: canonical.bytes, readable: true, text: '', kind: 'sample' });
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -71,7 +72,7 @@ export default function App() {
       return;
     }
     const built = buildScenarioDocument(id, facts);
-    setDoc({ filename: built.filename, bytes: built.bytes, readable: built.facts.docSupported, text: '' });
+    setDoc({ filename: built.filename, bytes: built.bytes, readable: built.facts.docSupported, text: '', kind: 'sample' });
     setFacts(built.facts);
     setAmountText(built.facts.amountCents != null ? (built.facts.amountCents / 100).toFixed(2) : '');
   }, [facts]);
@@ -152,7 +153,7 @@ export default function App() {
       setFacts(normalizeFacts({ ...BASE_INVOICE, filename: 'northline_inv1042.pdf', factsSource: 'generated' }));
       setAmountText('480.00');
       const canonical = buildScenarioDocument('renamed', { ...BASE_INVOICE });
-      setDoc({ filename: canonical.filename, bytes: canonical.bytes, readable: true, text: '' });
+      setDoc({ filename: canonical.filename, bytes: canonical.bytes, readable: true, text: '', kind: 'sample' });
       setScenario('renamed');
       setVerdict(null);
       lastRequestId.current = null;
@@ -174,20 +175,40 @@ export default function App() {
         bytes,
         readable: res.supported,
         text: res.textPreview,
+        kind: 'upload',
       });
       if (res.supported && res.fields) {
+        // Fields the document did not state stay empty — never keep a
+        // previous/sample value for a required fact.
+        const f = res.fields;
         const merged = normalizeFacts({
-          ...facts,
-          ...Object.fromEntries(Object.entries(res.fields).filter(([, v]) => v != null && v !== '')),
+          supplier: f.supplier ?? '',
+          invoiceNumber: f.invoiceNumber ?? '',
+          currency: f.currency ?? 'USD',
+          amountCents: f.amountCents ?? null,
+          period: f.period ?? '',
+          items: f.items ?? [],
           filename: res.filename,
           factsSource: 'extracted',
           docSupported: true,
         });
         setFacts(merged);
         setAmountText(merged.amountCents != null ? (merged.amountCents / 100).toFixed(2) : '');
-        setUploadNote(`Extracted ${res.found.length} field(s) from ${res.filename} — confirm or edit before validating.`);
+        const missing = [
+          !merged.supplier && 'supplier',
+          !merged.invoiceNumber && 'invoice number',
+          merged.amountCents == null && 'amount',
+        ].filter(Boolean).join(', ');
+        setUploadNote(missing
+          ? `Extracted ${res.found.length} field(s) from ${res.filename} — it does not state ${missing}. Fill those in to validate; no prior values were kept.`
+          : `Extracted ${res.found.length} field(s) from ${res.filename} — confirm or edit before validating.`);
       } else {
-        setFacts((f) => ({ ...f, docSupported: false, filename: res.filename }));
+        setFacts(normalizeFacts({
+          supplier: '', invoiceNumber: '', currency: 'USD', amountCents: null,
+          period: '', items: [], filename: res.filename,
+          factsSource: 'manual', docSupported: false,
+        }));
+        setAmountText('');
         setUploadNote('No readable text found. Nothing was guessed — enter the invoice facts manually to validate.');
       }
       setScenario('upload');
@@ -198,6 +219,9 @@ export default function App() {
   }, [adapter, facts]);
 
   const stats = state?.stats;
+  // A required fact missing means the current document didn't state it and
+  // nothing was kept from before — the user must complete it before validating.
+  const factsComplete = !!(facts.supplier && facts.invoiceNumber && facts.amountCents != null);
 
   return (
     <div className="page">
@@ -213,9 +237,8 @@ export default function App() {
         {bannerOpen && (
           <div className="intro-banner" role="note">
             <p>
-              <strong>The challenge:</strong> this sample $480 invoice from Northline Studio has already been paid.
-              Pick an attack below — rename it, reformat it, change its number, or fire ten requests at once —
-              and try to make the sandbox pay it again. Sample data only; nothing real moves.
+              <strong>The challenge:</strong> this sample $480 invoice from Northline Studio has already
+              been paid. Pick an attack and try to make the sandbox pay it again — sample data only.
             </p>
             <button className="banner-dismiss" onClick={() => setBannerOpen(false)} aria-label="Dismiss">×</button>
           </div>
@@ -228,11 +251,14 @@ export default function App() {
             scenario={scenario}
             busy={busy}
             uploadNote={uploadNote}
+            canValidate={factsComplete}
             canReplay={!!lastRequestId.current}
-            onFactsChange={(patch) => setFacts((f) => ({ ...f, ...patch, factsSource: 'manual' }))}
+            onFactsChange={(patch) =>
+              setFacts((f) => ({ ...f, ...patch, factsSource: f.factsSource === 'extracted' ? 'extracted' : 'manual' }))
+            }
             onAmountChange={(text, cents) => {
               setAmountText(text);
-              setFacts((f) => ({ ...f, amountCents: cents, factsSource: 'manual' }));
+              setFacts((f) => ({ ...f, amountCents: cents, factsSource: f.factsSource === 'extracted' ? 'extracted' : 'manual' }));
             }}
             onScenario={applyScenario}
             onValidate={scenario === 'burst' ? doBurst : doValidate}

@@ -1,7 +1,7 @@
 # Design review — pay-me-twice-concept.png vs rendered app
 
 Compared `pay-me-twice-concept.png` (1536x1024) against live captures in
-`docs/screenshots/` (Chrome, 1536x1024 and ~390px mobile emulation).
+`docs/screenshots/` (Chrome, 1536x1024 emulation and 390px mobile).
 
 ## Faithful
 
@@ -24,8 +24,9 @@ Compared `pay-me-twice-concept.png` (1536x1024) against live captures in
 ## Deliberate differences (functional, documented in BUILD-CONTRACT §Design)
 
 - **Intro banner** ("The challenge…") — the spec requires an initial
-  explanatory screen; ours is a dismissible banner. It pushes the ledger
-  below the fold at 1536x1024; dismissing it restores near-concept height.
+  explanatory screen; ours is a dismissible one-line banner. It no longer
+  pushes the ledger below the fold: at 1536x1024 the card row starts at
+  y≈179 (concept ≈159) and the entire ledger (y≈765→921) is visible.
 - **Six scenario buttons vs four** — the spec's attack list (rename, layout,
   changed reference, concurrency burst) plus the two required counterexamples
   (legitimate next-month bill, unreadable scan) need six; the concept's
@@ -33,8 +34,12 @@ Compared `pay-me-twice-concept.png` (1536x1024) against live captures in
 - **Currency select next to Amount** — the acceptance matrix requires
   currency isolation; the engine enforces per-currency identity and never
   aggregates across currencies.
-- **"September 2024" vs "September"** — the contract's explicit-fixture-date
-  correction; all dates come from the fixture clock.
+- **Billing period is a real month input** — any real month (including the
+  current one) can be entered, plus a **Not stated** checkbox for the
+  no-period case; nothing inherits a sample period.
+- **"September 2026" vs "September"** — the contract's explicit-fixture-date
+  correction; all dates come from the fixture clock (base: Sep 3, 2026,
+  10:14 AM America/New_York).
 - **Stats line** — "N payments recorded · M duplicate sandbox payments
   blocked · K held for review" with the spec-required disclaimer that
   blocked duplicates are prevented repeats, not measured savings (concept's
@@ -48,6 +53,38 @@ Compared `pay-me-twice-concept.png` (1536x1024) against live captures in
 - **Duplicate icon** — `⊘` in a filled circle rather than `!`; the pink
   blocked treatment is kept.
 
+## "Invoice (as received)" evidence rules
+
+- **Sample documents** render the styled paper sheet — a labeled synthetic
+  preview of the seeded invoice ("Facts source: sample data").
+- **Uploads** show the document's own extracted text verbatim with an
+  origin note ("Original text extracted from <filename>. Fields it does
+  not state are left blank…"). No address, bill-to, dates, or tax are
+  invented for uploaded files, and the panel does not follow editable
+  facts — it is source evidence.
+- **Unreadable uploads** show the "no text could be extracted" empty state;
+  all fact fields start blank for intentional manual entry.
+- Upload/manual entry controls live in a collapsed **Upload or enter
+  manually** disclosure to keep the card compact.
+
+## Upload safety rules (audit fixes)
+
+- A new document **never retains** prior or sample values for supplier,
+  invoice number, amount, or period. Extraction fills only what the text
+  states; everything else stays blank and the form says which required
+  facts are missing.
+- **Pay is blocked until verified**: supplier + invoice number + amount
+  must all be present before Validate / Try to get paid / Replay can run,
+  with an inline note that missing facts are never backfilled.
+- `factsSource` stays honest: extraction-filled fields are "extracted",
+  fields the user typed become "manual".
+- The native PDF reader parses escaped literal strings (`\(`, `\)`, `\\`,
+  octal escapes, line continuations, nested balanced parens) across `Tj`,
+  `TJ`, and `'` operators, so `Total \(USD\) $17.25` extracts as $17.25.
+- Regression coverage: engine + HTTP acceptance tests for the escaped-parens
+  total with missing period, incomplete-text extraction leaving fields
+  absent, and manually-entered incomplete facts being unpayable.
+
 ## Issues found in browser testing and repaired
 
 - Ledger badge printed lowercase `clear` for clear validations → added the
@@ -55,19 +92,23 @@ Compared `pay-me-twice-concept.png` (1536x1024) against live captures in
 - Evidence modal showed "no hash" for hash-matched duplicates → the
   validated facts (with `docHash`) are now persisted into evidence state.
 - Fixture timestamps rendered as UTC "2:14 PM" → formatted in
-  America/New_York so the ledger reads "Sep 3, 2024, 10:14 AM" as intended.
+  America/New_York so the ledger reads "Sep 3, 2026, 10:14 AM".
 - "Next month's real bill" previously composed on the *current* fields, so
   after the changed-reference scenario it produced `INV-1043A` with no period
   → review instead of clear. It now derives from the seeded invoice and
-  always produces INV-1043 / October 2024.
+  always produces INV-1043 / October 2026.
 - IBM Plex Sans previously relied on a Google Fonts link → self-hosted.
+- Grid items' min-content could force the one-column mobile track wider
+  than the viewport (390px → scrollWidth 437 in QA) → tracks are now
+  `minmax(0, 1fr)` at every breakpoint.
 
 ## Mobile (390px)
 
-Topbar stacks, cards go single-column, the ledger table scrolls horizontally
-inside its card, all controls remain reachable and keyboard-operable.
-(`mobile-initial.png` is captured at 420 CSS px because the test box's window
-has a minimum width; layout is identical at 390.)
+Topbar stacks, the workspace goes single-column via `minmax(0, 1fr)` tracks,
+fact fields are one column below 560px, all inputs and controls have
+`min-width: 0`, and the ledger table scrolls horizontally inside its card.
+Verified at a true 390px viewport: `scrollWidth == innerWidth == 390` — no
+horizontal page overflow (`mobile-initial.png`).
 
 ## Known honest limitations (by design)
 
