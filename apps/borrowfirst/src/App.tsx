@@ -20,7 +20,11 @@ export default function App() {
   const [excludedAssets, setExcludedAssets] = useState<Set<string>>(new Set());
   const [includedAssets, setIncludedAssets] = useState<Set<string>>(new Set());
   const [excludedQuotes, setExcludedQuotes] = useState<Set<string>>(new Set());
-  const [confirmed, setConfirmed] = useState<{ reservations: Reservation[]; costCents: number } | null>(null);
+  const [confirmed, setConfirmed] = useState<{
+    reservations: Reservation[];
+    costCents: number;
+    plan: AllocationPlan;
+  } | null>(null);
   const [reserveFailures, setReserveFailures] = useState<ReserveFailure[]>([]);
   const [banner, setBanner] = useState<{ kind: 'info' | 'error'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -135,7 +139,7 @@ export default function App() {
       const result = await backend.reserve(request, plan);
       setWorld(result.world);
       if (result.ok) {
-        setConfirmed({ reservations: result.reservations, costCents: plan.totalCostCents });
+        setConfirmed({ reservations: result.reservations, costCents: plan.totalCostCents, plan });
         setBanner({
           kind: 'info',
           text: `${result.reservations.length} asset(s) reserved atomically for ${request.id}. Confirmed purchasing plan — not realized savings.`,
@@ -169,8 +173,11 @@ export default function App() {
 
   const doExport = () => {
     if (!plan || !world || !backend) return;
+    // Export the approved allocation — after reserving, that's the frozen
+    // confirmed plan, not the recomputed one against reduced inventory.
+    const exportPlan = confirmed?.plan ?? plan;
     const doc = buildExport(
-      plan,
+      exportPlan,
       world,
       confirmed?.reservations ?? [],
       backend.mode,
@@ -182,7 +189,7 @@ export default function App() {
     });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `borrowfirst-plan-${plan.request.id}.txt`;
+    a.download = `borrowfirst-plan-${exportPlan.request.id}.txt`;
     a.click();
     URL.revokeObjectURL(a.href);
   };
