@@ -119,8 +119,8 @@ describe('numeric cost comparison', () => {
 describe('strict CSV parsing', () => {
   const rows = (overrides: (r: string[]) => void): string => {
     const body =
-      'Acme,widget,100,10,1,500,,,USD,2099-01-01\n' +
-      'Acme,gadget,200,10,1,500,,,USD,2099-01-01';
+      'Acme,widget,100,10,1,500,,,USD,2026-09-01,2099-01-01\n' +
+      'Acme,gadget,200,10,1,500,,,USD,2026-09-01,2099-01-01';
     const arr = body.split('\n').map((l) => l.split(','));
     overrides(arr[0]);
     return CSV_TEMPLATE.split('\n')[1] + '\n' + arr.map((r) => r.join(',')).join('\n');
@@ -147,7 +147,7 @@ describe('strict CSV parsing', () => {
   });
 
   it('rejects an expired valid_until on any row, not just the last', () => {
-    const { errors, quoteSet } = parseCsvQuoteSet(rows((r) => (r[9] = '2020-01-01')), now);
+    const { errors, quoteSet } = parseCsvQuoteSet(rows((r) => (r[10] = '2020-01-01')), now);
     expect(quoteSet).toBeUndefined();
     expect(errors.join(' ')).toMatch(/expired/);
   });
@@ -155,8 +155,8 @@ describe('strict CSV parsing', () => {
   it('rejects conflicting repeated-vendor fields instead of last-row-wins', () => {
     const csv =
       CSV_TEMPLATE.split('\n')[1] +
-      '\nAcme,widget,100,10,1,500,,,USD,2099-01-01' +
-      '\nAcme,gadget,200,10,1,900,,,USD,2099-01-01';
+      '\nAcme,widget,100,10,1,500,,,USD,2026-09-01,2099-01-01' +
+      '\nAcme,gadget,200,10,1,900,,,USD,2026-09-01,2099-01-01';
     const { quoteSet, errors } = parseCsvQuoteSet(csv, now);
     expect(quoteSet).toBeUndefined();
     expect(errors.join(' ')).toMatch(/conflicts/);
@@ -165,17 +165,41 @@ describe('strict CSV parsing', () => {
   it('rejects duplicate (vendor, sku) quote rows', () => {
     const csv =
       CSV_TEMPLATE.split('\n')[1] +
-      '\nAcme,widget,100,10,1,500,,,USD,2099-01-01' +
-      '\nAcme,widget,150,10,1,500,,,USD,2099-01-01';
+      '\nAcme,widget,100,10,1,500,,,USD,2026-09-01,2099-01-01' +
+      '\nAcme,widget,150,10,1,500,,,USD,2026-09-01,2099-01-01';
     const { errors } = parseCsvQuoteSet(csv, now);
     expect(errors.join(' ')).toMatch(/duplicate/);
+  });
+
+  it('requires provenance on every row — never invents currency/dates', () => {
+    for (const [idx, name] of [[8, 'currency'], [9, 'quoted_at'], [10, 'valid_until']] as const) {
+      const { quoteSet, errors } = parseCsvQuoteSet(rows((r) => (r[idx] = '')), now);
+      expect(quoteSet, name).toBeUndefined();
+      expect(errors.join(' ')).toContain(`${name} is required`);
+    }
+  });
+
+  it('rejects a CSV missing the provenance columns entirely', () => {
+    const csv =
+      'vendor,sku,unit_cents,stock,delivery_days,shipping_cents\n' +
+      'Acme,widget,100,10,1,500\nAcme,gadget,200,10,1,500';
+    const { quoteSet, errors } = parseCsvQuoteSet(csv, now);
+    expect(quoteSet).toBeUndefined();
+    for (const c of ['currency', 'quoted_at', 'valid_until']) {
+      expect(errors.join(' ')).toContain(`missing column "${c}"`);
+    }
+  });
+
+  it('rejects conflicting quoted_at across rows', () => {
+    const { errors } = parseCsvQuoteSet(rows((r) => (r[9] = '2026-01-15')), now);
+    expect(errors.join(' ')).toMatch(/quoted_at.*conflicts/);
   });
 
   it('rejects two vendor names that normalize to the same id', () => {
     const csv =
       CSV_TEMPLATE.split('\n')[1] +
-      '\nAcme Inc,widget,100,10,1,500,,,USD,2099-01-01' +
-      '\nAcme-Inc,gadget,200,10,1,500,,,USD,2099-01-01';
+      '\nAcme Inc,widget,100,10,1,500,,,USD,2026-09-01,2099-01-01' +
+      '\nAcme-Inc,gadget,200,10,1,500,,,USD,2026-09-01,2099-01-01';
     const { errors } = parseCsvQuoteSet(csv, now);
     expect(errors.join(' ')).toMatch(/collides|same id/);
   });

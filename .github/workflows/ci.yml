@@ -39,6 +39,8 @@ jobs:
           cache-dependency-path: apps/${{ matrix.app }}/package-lock.json
       - name: Install
         run: npm ci
+      - name: Typecheck
+        run: npm run typecheck --if-present
       - name: Test
         run: npm test
       - name: Build
@@ -62,3 +64,15 @@ jobs:
             fi
           done
           exit $missing
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.14'
+          cache: npm
+          cache-dependency-path: apps/cart-tetris/package-lock.json
+      - name: Suite: install + typecheck + test + build every app
+        run: |
+          set -e
+          for slug in cart-tetris pay-me-twice borrowfirst budget-brawl exitlane; do
+            echo "=== $slug ==="
+            (cd "apps/$slug" && npm ci && npm run typecheck --if-present && npm test && npm run build)
+          done

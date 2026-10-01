@@ -124,7 +124,10 @@ export function parseCsvQuoteSet(text: string, now: Date = new Date()): { quoteS
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
   if (lines.length < 2) return { errors: ['CSV needs a header and at least one data row'] };
   const header = lines[0].split(',').map((h) => h.trim());
-  const need = ['vendor', 'sku', 'unit_cents', 'stock', 'delivery_days', 'shipping_cents'];
+  const need = [
+    'vendor', 'sku', 'unit_cents', 'stock', 'delivery_days', 'shipping_cents',
+    'currency', 'quoted_at', 'valid_until',
+  ];
   for (const n of need) {
     if (!header.includes(n)) errors.push(`missing column "${n}"`);
   }
@@ -152,6 +155,7 @@ export function parseCsvQuoteSet(text: string, now: Date = new Date()): { quoteS
   const vendors = new Map<string, Vendor>();
   const vendorNames = new Map<string, string>();
   let currency = '';
+  let quotedAt = '';
   let validUntil = '';
   for (const [i, line] of lines.slice(1).entries()) {
     const row = line.split(',');
@@ -213,46 +217,60 @@ export function parseCsvQuoteSet(text: string, now: Date = new Date()): { quoteS
     if (Number.isSafeInteger(unitCents) && Number.isSafeInteger(stock)) {
       v.quotes[sku] = { skuId: sku, unitCents, stock };
     }
+    // File-level provenance is required on every row — never invented.
     const cur = col(row, 'currency');
-    if (cur) {
+    if (!cur) {
+      errors.push(`${label}: currency is required`);
+    } else {
       if (cur !== 'USD') errors.push(`${label}: currency must be USD (got "${cur}")`);
       if (currency && cur !== currency) errors.push(`${label}: currency "${cur}" conflicts with "${currency}"`);
       currency = currency || cur;
     }
-    const vu = col(row, 'valid_until');
-    if (vu) {
-      if (Number.isNaN(Date.parse(vu))) {
-        errors.push(`${label}: valid_until "${vu}" is not a date`);
-      } else {
-        if (new Date(vu) < now) errors.push(`${label}: quote expired on ${vu}`);
-        if (validUntil && vu !== validUntil) {
-          errors.push(`${label}: valid_until "${vu}" conflicts with "${validUntil}"`);
-        }
-        validUntil = validUntil || vu;
+    const qa = col(row, 'quoted_at');
+    if (!qa) {
+      errors.push(`${label}: quoted_at is required`);
+    } else if (Number.isNaN(Date.parse(qa))) {
+      errors.push(`${label}: quoted_at "${qa}" is not a date`);
+    } else {
+      if (quotedAt && qa !== quotedAt) {
+        errors.push(`${label}: quoted_at "${qa}" conflicts with "${quotedAt}"`);
       }
+      quotedAt = quotedAt || qa;
+    }
+    const vu = col(row, 'valid_until');
+    if (!vu) {
+      errors.push(`${label}: valid_until is required`);
+    } else if (Number.isNaN(Date.parse(vu))) {
+      errors.push(`${label}: valid_until "${vu}" is not a date`);
+    } else {
+      if (new Date(vu) < now) errors.push(`${label}: quote expired on ${vu}`);
+      if (validUntil && vu !== validUntil) {
+        errors.push(`${label}: valid_until "${vu}" conflicts with "${validUntil}"`);
+      }
+      validUntil = validUntil || vu;
     }
   }
   if (errors.length > 0) return { errors };
   const qs: QuoteSet = {
-    currency: currency || 'USD',
-    quotedAt: new Date().toISOString(),
-    validUntil: validUntil || new Date(Date.now() + 30 * 86400e3).toISOString().slice(0, 10),
+    currency,
+    quotedAt,
+    validUntil,
     vendors: [...vendors.values()],
   };
   return validateQuoteSet(qs, now);
 }
 
 export const CSV_TEMPLATE = `# Cart Tetris quote template (example data, USD cents)
-vendor,sku,unit_cents,stock,delivery_days,shipping_cents,free_threshold_cents,min_order_cents,currency,valid_until
-North Supply,coffee,1200,50,1,1800,,,USD,2027-01-01
-North Supply,cups,400,50,1,1800,,,USD,2027-01-01
-North Supply,snack-bars,600,50,1,1800,,,USD,2027-01-01
-Bulk Club,coffee,1000,50,2,1800,6000,,USD,2027-01-01
-Bulk Club,cups,1500,50,2,1800,6000,,USD,2027-01-01
-Bulk Club,snack-bars,500,50,2,1800,6000,,USD,2027-01-01
-QuickBox,coffee,1300,50,1,600,20000,,USD,2027-01-01
-QuickBox,cups,350,50,1,600,20000,,USD,2027-01-01
-QuickBox,snack-bars,650,50,1,600,20000,,USD,2027-01-01
+vendor,sku,unit_cents,stock,delivery_days,shipping_cents,free_threshold_cents,min_order_cents,currency,quoted_at,valid_until
+North Supply,coffee,1200,50,1,1800,,,USD,2026-09-01,2027-01-01
+North Supply,cups,400,50,1,1800,,,USD,2026-09-01,2027-01-01
+North Supply,snack-bars,600,50,1,1800,,,USD,2026-09-01,2027-01-01
+Bulk Club,coffee,1000,50,2,1800,6000,,USD,2026-09-01,2027-01-01
+Bulk Club,cups,1500,50,2,1800,6000,,USD,2026-09-01,2027-01-01
+Bulk Club,snack-bars,500,50,2,1800,6000,,USD,2026-09-01,2027-01-01
+QuickBox,coffee,1300,50,1,600,20000,,USD,2026-09-01,2027-01-01
+QuickBox,cups,350,50,1,600,20000,,USD,2026-09-01,2027-01-01
+QuickBox,snack-bars,650,50,1,600,20000,,USD,2026-09-01,2027-01-01
 `;
 
 export function parseQuoteImport(text: string, now: Date = new Date()): { quoteSet?: QuoteSet; errors: string[] } {
