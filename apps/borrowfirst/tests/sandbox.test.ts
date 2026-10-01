@@ -109,4 +109,42 @@ describe('B14 — reset and export fidelity in sandbox', () => {
     const csv = exportToCsv(doc);
     expect(csv).toContain('rsv-');
   });
+
+  it('legacy payload without route destinations reseeds instead of degrading', () => {
+    // Simulate a pre-route-schema persisted world (v1): usable-looking
+    // assets but transferOptions missing destinationLocationId.
+    const legacy = seedWorld() as unknown as { transferOptions: { destinationLocationId?: string }[] };
+    for (const t of legacy.transferOptions) delete t.destinationLocationId;
+    (globalThis as Record<string, unknown>).localStorage.setItem(
+      'borrowfirst.sandbox.v1',
+      JSON.stringify({ world: legacy }),
+    );
+    const store = new SandboxStore();
+    const w = store.load();
+    // Honest reseed: every route carries a destination again and
+    // allocation returns the real $255 plan, not a phantom all-new $675.
+    expect(w.transferOptions.every((t) => typeof t.destinationLocationId === 'string')).toBe(true);
+    const plan = allocate(defaultRequest(), w, DEMO_NOW);
+    expect(plan.totalCostCents).toBe(25500);
+  });
+
+  it('two instances with working storage see each other — no silent overwrite', async () => {
+    const s1 = new SandboxStore();
+    const s2 = new SandboxStore();
+    s1.load();
+    s2.load();
+    const w = s1.load();
+    const request = { ...defaultRequest(), id: 'req-single', quantity: 1 };
+    const plan = allocate(request, w, DEMO_NOW);
+    expect(plan.transfers.map((t) => t.assetId)).toEqual(['M-101']);
+    const r1 = await s1.reserve(request, plan);
+    expect(r1.ok).toBe(true);
+    // s2 must re-read the shared store and conflict, not blindly overwrite.
+    const r2 = await s2.reserve({ ...request, id: 'req-other' }, plan);
+    expect(r2.ok).toBe(false);
+    expect(r2.failures.some((f) => f.code === 'ASSET_RESERVED')).toBe(true);
+    expect(
+      s1.load().reservations.filter((r) => r.status === 'confirmed').map((r) => r.requestId),
+    ).toEqual(['req-single']);
+  });
 });
