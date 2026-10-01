@@ -150,7 +150,8 @@ export function computePlan(state) {
   const a = state.approval;
   let approvalStatus = 'none';
   if (a) {
-    if (a.revoked) approvalStatus = 'revoked';
+    if (state.committedApprovals[a.id]) approvalStatus = 'committed';
+    else if (a.revoked) approvalStatus = 'revoked';
     else if (a.epoch !== state.epoch) approvalStatus = 'stale-epoch';
     else if (a.fingerprint !== fp) approvalStatus = 'stale';
     else if (expired) approvalStatus = 'expired';
