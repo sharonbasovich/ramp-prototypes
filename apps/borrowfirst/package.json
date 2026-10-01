@@ -1,0 +1,30 @@
+{
+  "name": "borrowfirst",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "BorrowFirst — find equipment your company already owns before buying more. Ramp private-event prototype.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.server.json && vite build",
+    "build:server": "tsc -p tsconfig.server.json",
+    "start": "npm run build --silent && node --experimental-sqlite server/index.mjs",
+    "test": "npm run build:server --silent && vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@fontsource/manrope": "5.2.5",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.0",
+    "@types/react": "19.1.8",
+    "@types/react-dom": "19.1.6",
+    "@vitejs/plugin-react": "5.0.2",
+    "typescript": "5.9.2",
+    "vite": "7.1.5",
+    "vitest": "3.2.4"
+  }
+}
