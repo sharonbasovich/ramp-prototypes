@@ -5,10 +5,10 @@ This is a review-only branch. No app code was changed and no builder fixes are d
 | App | Branch | First review | **Repaired head reviewed** | Port |
 |---|---|---|---|---|
 | Cart Tetris (+ root runner) | `codex/cart-tetris` PR1 | `1090a66` | **`eb0122d`** | 5311 |
-| Budget Brawl | `codex/budget-brawl` PR2 | `32468be` | `32468be` (no repaired head pushed yet) | 5314 |
+| Budget Brawl | `codex/budget-brawl` PR2 | `32468be` | **`0e5e7b7`** | 5314 |
 | BorrowFirst | `codex/borrowfirst` PR3 | `e2942ab` | **`df48f9e`** | 5313 |
 | Pay Me Twice | `codex/pay-me-twice` PR4 | `2ef72e2` | **`a0b08c7`** | 5312 |
-| ExitLane | `codex/exitlane` | — | **`31bc5d0`** | 5315 |
+| ExitLane | `codex/exitlane` PR6 | — | **`31bc5d0`** (the builder is still fixing it; I'll re-review the final head) | 5315 |
 
 ## Checks (Node 22.14.0, Linux)
 
@@ -17,7 +17,7 @@ This is a review-only branch. No app code was changed and no builder fixes are d
 | Cart `eb0122d` | ok | 50/50 including my 2-test independent oracle | ok | ok | sqlite |
 | Pay `a0b08c7` | ok | 41/41 | ok | ok | sqlite |
 | Borrow `df48f9e` | ok | 47/47 | ok | ok | sqlite |
-| Budget `32468be` | ok | 21/21 | ok | ok | sqlite |
+| Budget `0e5e7b7` | ok | 35/35 | ok | ok | sqlite |
 | Exit `31bc5d0` | ok | 32/32 (`node --test`) | ok | ok | sqlite |
 
 Static builds fall back to the "Browser sandbox" label; the console shows the expected `/api/health` 404. That 404 is the probe that triggers the fallback and is not a defect.
@@ -44,7 +44,7 @@ Static builds fall back to the "Browser sandbox" label; the console shows the ex
 | Root runner on Windows (`spawnSync npm`, status `null`) | Fixed in `b09cc5a`/`eb0122d`: `npm_execpath` under the current Node, then `npm.cmd` with `shell` on win32, with `r.error` reported. Not run on a real Windows host. |
 | Pay: missing fields, escaped PDF totals, 2026 fixtures, mobile overflow | Fixed. 390px `scrollWidth` is 390. |
 | Borrow: forced selection, server plan validation, restart persistence, confirmed-plan UI, mobile overflow | Fixed. After reserving, the panel shows Proposed $255 with Confirmed $255 (`screenshots/borrow-final-after-reserve.png`). 390px `scrollWidth` is 390. |
-| Budget: holds swept only on GET, Windows test teardown, "Prevented" counting pending requests | **Not reassessed.** No repaired head had been pushed when this was written. |
+| Budget: holds swept only on GET, "Prevented" counting pending requests, command epochs | Fixed in `0e5e7b7`. `sweepExpired` now also runs inside place/approve/commit/cancel. With `quoteTtlMs:1000`, approving after 1.6 s with no GET in between returns `expired` and the next request reserves the released funds (`probes/budget4.mjs`). The headline now reads "Denied for budget: 0 · Pending approval or funds: 2". A stale `epoch` is rejected with `stale_epoch`. 20 concurrent requests left reserved 6000 of 10000, so the invariant holds. Windows test teardown is not run on a real Windows host. |
 
 ## Remaining findings (P1: none)
 
@@ -55,6 +55,7 @@ Static builds fall back to the "Browser sandbox" label; the console shows the ex
 4. ~~Root runner: `runStart` removes items from `list` while iterating it.~~ **Fixed in `eb0122d`**: builds now go into a separate `ready` list, and only built apps are started.
 
 **P3**
+- **Budget** (`0e5e7b7`): the agent status cards come from local `lane.last` state. After a reload or in a second tab they read "Idle — No request sent yet" even though the timeline shows the same requests awaiting approval (`screenshots/budget-final-390.png`). Fix: derive each card from the latest snapshot request per agent. On mobile the timeline table scrolls inside its card (page `scrollWidth` is 390), and its rows have large blank gaps.
 - **Pay** (still present at `a0b08c7`): a missing currency is now rejected, but the API still accepts any 3-letter code — `POST /api/pay` with `currency:"XXX"` returns `recorded`. The UI offers only USD/EUR/GBP. Restrict the allowlist on the server.
 - **Pay:** the billing-period date input is truncated at 1536 ("September 2⌷") next to "Not stated".
 - **Cart:** with a 1-day deadline the result reads "$0.00 less" with no explanation. Add "Only QuickBox delivers in 1 day".
@@ -64,7 +65,7 @@ Static builds fall back to the "Browser sandbox" label; the console shows the ex
 - **Cart:** savings card bottom at about 650px; Approve/Export at about 880px. Fits.
 - **Pay:** verdict, ledger header and first ledger rows fit (ledger table header at y≈837).
 - **Borrow:** proposed solution, "Potential spending avoided" and Confirm all fit (Confirm bottom ≈645).
-- **Budget** (unrepaired head): totals, prevented line and agent cards fit.
+- **Budget** (`0e5e7b7`): after launch, the whole page including the timeline and its Approve/Reject actions fits in 1024 (scrollHeight 1024). At 390px `scrollWidth` is 390 and no element extends past the right edge (`screenshots/budget-final-1536.png`, `budget-final-390.png`).
 - **Exit:** does not fit (see P2-1).
 
 ## Probe usage
