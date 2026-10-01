@@ -1,9 +1,10 @@
 # Ramp private-event demo lineup
 
-These are five separate prototypes, built for the private event Sharon identified. The public Luma event's rules were not applied. Fixture prices and transactions are samples. Use the app's actual mode label when explaining enforcement.
+These are six separate prototypes, built for the private event Sharon identified. Borderless contains three currency scenarios. The public Luma event's rules were not applied. Fixture prices and transactions are samples. Use the app's actual mode label when explaining enforcement.
 
 | Prototype | Opening line | Show in 30 seconds | What proves it works |
 | --- | --- | --- | --- |
+| Borderless | “A €900 approval can break a $1,000 budget.” | Approve the USD980 projection, move the fixture FX rate, then show USD1,016 blocked against USD1,000. Switch to Currency Check for ambiguous dollar amounts or True Cost for a supplier winner that changes after fees. | Exact minor-unit/rational-rate engine; original currency retained, stale approvals revoked, incomplete estimates blocked. Browser-only sandbox, no payments. |
 | Cart Tetris | “The cheapest prices made the most expensive cart.” | Start with $101 all-in from one vendor. Split the order to $81.50, inspect the $19.50 difference, then require delivery tomorrow and watch the bargain disappear. Approve and export. | Exact bounded allocation engine, shipping thresholds and delivery constraints; arithmetic visible per vendor. |
 | Pay Me Twice | “Can you make this invoice get paid twice?” | Rename or reformat an already-paid invoice: show the duplicate evidence. Send parallel retries: one eligible bill gets one sandbox payment. Show that a genuine next-period invoice still passes. | Normalized facts plus document identity, review for uncertain data, transactional idempotent ledger. |
 | BorrowFirst | “You're about to buy something your company already owns.” | Ask for three monitors: $675 all-new versus $255 with two transfers and one purchase. Confirm the asset owner, reserve, then show the frozen $420 potential reduction and remaining shopping list. | Attribute and route matching, owner confirmation, unique reservations and a defensible all-new baseline. |
@@ -14,6 +15,8 @@ These are five separate prototypes, built for the private event Sharon identifie
 
 Start with **Cart Tetris** when we want an immediately inspectable engine. Let the visitor change the deadline or one price. **BorrowFirst** has the most familiar waste story; show owner confirmation and the final reservation, not just a search result. **Budget Brawl** gives the strongest visible race and permission-control demonstration.
 
+For the new international-expansion angle, lead with **Borderless FX Guard**. Ramp already supports global spend and local currencies: our proposed extension makes currency context and approval intent inspectable. Currency Check is a supporting preflight flow, and True Cost turns supplied quote assumptions into a comparable purchasing decision. The research memo records current product distinctions and sources.
+
 Pay Me Twice works best as a challenge with a clear successful next-period control. ExitLane works best with the deadline visible and a deliberate clock change. Keep the opening short; explain implementation only after the audience has seen the result.
 
 ## Claims to keep precise
@@ -22,6 +25,7 @@ Pay Me Twice works best as a challenge with a clear successful next-period contr
 - Pay blocks duplicate sandbox payments; it does not prove that every fraudulent invoice can be detected.
 - Budget demonstrates enforcement through its instrumented sandbox. Browser mode is not proof of server or cross-device enforcement, and the operator sandbox is not a production authentication boundary.
 - ExitLane shows estimated refunds until a labeled sandbox provider outcome. It never contacts a real supplier.
+- Borderless FX Guard shows changed exposure, not money saved. Its two-minute demo quote validity is our simulation rule, not a Ramp rate-lock guarantee. Currency Check's Canada funding rule is a simplified documented example, not a complete coverage/eligibility engine. True Cost shows a USD30 potential difference against the converted-sticker-price choice in the supplied fixture; tax/duty are supplied assumptions.
 - None of the apps is a live Ramp integration or a live AI agent system. The algorithms and the local SQLite transactions are real; vendor data, actors and external actions are samples.
 
 ## Event-day check

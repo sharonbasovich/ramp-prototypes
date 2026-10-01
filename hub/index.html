@@ -48,14 +48,21 @@
         <div class="brand">Ramp prototypes</div>
         <div class="tag">private event · demo data only · no real transactions</div>
       </div>
-      <h1>Five ways small decisions leak money.</h1>
+      <h1>Small decisions. Real money.</h1>
       <p class="sub">
         Each prototype is a complete sandbox workflow — real engines, example
         data, honest labels. On GitHub Pages every app runs entirely in your
-        browser ("Browser sandbox"); locally each app can also serve a SQLite
-        sandbox backend on its own port.
+        browser ("Browser sandbox"). The original five also offer local SQLite
+        servers; Borderless explores currency assumptions entirely in-browser.
       </p>
       <div class="grid">
+        <a class="card" href="./borderless/">
+          <div>
+            <div class="name">Borderless</div>
+            <div class="desc">A dollar sign is not a currency — invoice preflight, FX approval guards and complete international purchase costs.</div>
+          </div>
+          <span class="port">localhost:5316</span><span class="go">Open →</span>
+        </a>
         <a class="card" href="./cart-tetris/">
           <div>
             <div class="name">Cart Tetris</div>
@@ -95,7 +102,7 @@
       <p class="note">
         Local run: <code>npm run setup</code> once, then <code>npm start</code>
         (each app on its own port above) — or open this page on GitHub Pages at
-        <code>/ramp-prototypes/</code>. The five links open the corresponding
+        <code>/ramp-prototypes/</code>. These links open the corresponding
         deployed browser sandboxes; locally run <code>npm run hub</code> in a
         second terminal to use these links with the app servers.
       </p>

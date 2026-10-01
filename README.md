@@ -1,7 +1,7 @@
 # ramp-prototypes
 
-Five working time-and-money-saving prototypes for a private Ramp event: Cart
-Tetris, Pay Me Twice, BorrowFirst, Budget Brawl, and ExitLane. All demo data,
+Working time-and-money-saving prototypes for a private Ramp event: Cart
+Tetris, Pay Me Twice, BorrowFirst, Budget Brawl, ExitLane, and Borderless. All demo data,
 sandbox persistence, honest labels — no real payments, accounts, or
 cancellations, and no API keys required.
 
@@ -22,8 +22,9 @@ npm start
 
 `npm run setup` installs dependencies for every app currently present under
 `apps/`; `npm start` builds any missing `dist/` and launches each app's
-sandbox server (React/Vite plus same-origin `/api` backed by `node:sqlite`)
-on its own port. To rebuild changed source, run `npm run build` first:
+sandbox server on its own port. The original five use React/Vite plus
+same-origin `/api` backed by `node:sqlite`; Borderless serves static files and
+uses browser state. To rebuild changed source, run `npm run build` first:
 
 | App | Directory | Port |
 | --- | --- | --- |
@@ -32,6 +33,7 @@ on its own port. To rebuild changed source, run `npm run build` first:
 | BorrowFirst | `apps/borrowfirst` | http://localhost:5313 |
 | Budget Brawl | `apps/budget-brawl` | http://localhost:5314 |
 | ExitLane | `apps/exitlane` | http://localhost:5315 |
+| Borderless | `apps/borderless` | http://localhost:5316 |
 
 Requires Node 22.14 or newer. Only directories that exist are touched. Run one
 app on macOS/Linux with `APP=cart-tetris npm start`. In PowerShell:
@@ -45,7 +47,7 @@ After stopping it with Ctrl+C, clear the filter with
 `Remove-Item Env:APP` before starting the full suite.
 
 Run `npm run hub` in a second terminal and open http://localhost:5300 for the
-demo hub linking all five local servers. Directly opening `hub/index.html`
+demo hub linking all local servers. Directly opening `hub/index.html`
 as a file does not launch or route to the apps. On GitHub Pages, the same
 hub uses relative links to the deployed app directories.
 
@@ -60,10 +62,12 @@ npm run build
 npm start
 ```
 
-Every build also works fully client-side from GitHub Pages — the app probes
+The original five builds also work fully client-side from GitHub Pages — each app probes
 `/api/health` and falls back to a labeled "Browser sandbox". Browser state uses
 IndexedDB, localStorage, or memory depending on the app and browser support;
 it is not a shared server database. No real transactions occur in either mode.
+Borderless uses its exact-money engine entirely in your browser, including on
+its optional local static server. It has no SQLite backend or shared budget.
 
 `npm run dev` starts an optional Vite development server. Use it separately
 from the full suite or assign an unused port: BorrowFirst's Vite default is
@@ -81,6 +85,7 @@ After the `main` Pages deployment succeeds, the hub is at
 | BorrowFirst | [Open BorrowFirst](https://sharonbasovich.github.io/ramp-prototypes/borrowfirst/) |
 | Budget Brawl | [Open Budget Brawl](https://sharonbasovich.github.io/ramp-prototypes/budget-brawl/) |
 | ExitLane | [Open ExitLane](https://sharonbasovich.github.io/ramp-prototypes/exitlane/) |
+| Borderless | [Open Borderless](https://sharonbasovich.github.io/ramp-prototypes/borderless/) |
 
 ## Root commands
 

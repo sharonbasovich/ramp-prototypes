@@ -47,17 +47,17 @@ jobs:
         run: npm run build
 
   suite:
-    # Final assembled verification: hard-requires all five apps. It runs only
+    # Final assembled verification: hard-requires all six apps. It runs only
     # on the default branch so in-flight builder PRs are not blocked while
     # sibling apps land in parallel.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Require all five apps
+      - name: Require all six apps
         run: |
           missing=0
-          for slug in cart-tetris pay-me-twice borrowfirst budget-brawl exitlane; do
+          for slug in cart-tetris pay-me-twice borrowfirst budget-brawl exitlane borderless; do
             if [ ! -f "apps/$slug/package.json" ]; then
               echo "::error::missing app: apps/$slug"
               missing=1
@@ -72,7 +72,7 @@ jobs:
       - name: 'Suite: install + typecheck + test + build every app'
         run: |
           set -e
-          for slug in cart-tetris pay-me-twice borrowfirst budget-brawl exitlane; do
+          for slug in cart-tetris pay-me-twice borrowfirst budget-brawl exitlane borderless; do
             echo "=== $slug ==="
             (cd "apps/$slug" && npm ci && npm run typecheck --if-present && npm test && npm run build)
           done

@@ -21,6 +21,7 @@ const PORTS = {
   borrowfirst: 5313,
   'budget-brawl': 5314,
   exitlane: 5315,
+  borderless: 5316,
 };
 
 // Cross-platform npm invocation: prefer running the npm CLI script under the

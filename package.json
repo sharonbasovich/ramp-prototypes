@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Five working time-and-money prototypes for a private Ramp event",
+  "description": "Working time-and-money prototypes for a private Ramp event",
   "scripts": {
     "setup": "node scripts/run-apps.mjs ci",
     "typecheck": "node scripts/run-apps.mjs typecheck",
