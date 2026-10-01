@@ -38,11 +38,21 @@ export function normalizeCurrency(value) {
   return String(value ?? '').trim().toUpperCase();
 }
 
+/**
+ * Provenance after the user edits facts: fields that came from a document or
+ * sample keep their origin, but the record becomes 'mixed' — it is no longer
+ * purely what the source stated. Facts that started blank stay 'manual'.
+ */
+export function factsSourceAfterEdit(source) {
+  if (source === 'manual' || source === 'mixed') return source;
+  return 'mixed';
+}
+
 export function normalizeFacts(facts) {
   const f = { ...facts };
   f.supplier = String(f.supplier ?? '').trim().replace(/\s+/g, ' ');
   f.invoiceNumber = String(f.invoiceNumber ?? '').trim().replace(/\s+/g, ' ');
-  f.currency = normalizeCurrency(f.currency || DEFAULT_CURRENCY);
+  f.currency = f.currency ? normalizeCurrency(f.currency) : '';
   f.amountCents = f.amountCents == null ? null : Number(f.amountCents);
   f.period = String(f.period ?? '').trim(); // 'YYYY-MM' or ''
   f.factsSource = f.factsSource || 'manual';
@@ -64,7 +74,8 @@ export function validateFacts(facts) {
   const errors = [];
   if (!facts.supplier) errors.push('Supplier is required.');
   if (!facts.invoiceNumber) errors.push('Invoice number is required.');
-  if (!/^[A-Z]{3}$/.test(facts.currency)) errors.push('Currency must be a 3-letter code.');
+  if (!facts.currency) errors.push('Currency is required — the document does not state one.');
+  else if (!/^[A-Z]{3}$/.test(facts.currency)) errors.push('Currency must be a 3-letter code.');
   if (
     !Number.isSafeInteger(facts.amountCents) ||
     facts.amountCents <= 0 ||
@@ -150,7 +161,7 @@ export function fixtureTimestamp(attemptSeq) {
 export async function evaluateInvoice(rawFacts, store) {
   const facts = normalizeFacts(rawFacts);
 
-  if (facts.docSupported === false && facts.factsSource !== 'manual') {
+  if (facts.docSupported === false && facts.factsSource !== 'manual' && facts.factsSource !== 'mixed') {
     return {
       status: 'unsupported',
       title: 'Unsupported document',
@@ -182,6 +193,8 @@ export async function evaluateInvoice(rawFacts, store) {
   ];
   if (facts.factsSource === 'manual') {
     evidence.push({ label: 'Facts source', value: 'Entered manually (no document text verified)' });
+  } else if (facts.factsSource === 'mixed') {
+    evidence.push({ label: 'Facts source', value: 'Document text + manual edits' });
   }
 
   // Signal 1 — identical document bytes already paid.

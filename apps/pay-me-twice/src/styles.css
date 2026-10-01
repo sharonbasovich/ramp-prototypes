@@ -299,6 +299,10 @@ body {
 }
 @media (max-width: 560px) {
   .fields { grid-template-columns: 1fr; }
+  .paper { padding: 12px 14px; }
+  .paper-meta { flex-direction: column; gap: 4px; }
+  .paper-meta dl > div { gap: 8px; }
+  .paper-meta dt { min-width: 78px; }
 }
 @media (max-width: 640px) {
   .page { padding: 0 14px 18px; }

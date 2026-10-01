@@ -229,6 +229,31 @@ describe('Pay Me Twice acceptance matrix (HTTP + node:sqlite)', () => {
     expect(after.payments.length).toBe(before.payments.length);
   });
 
+  it('document without a currency leaves it unstated; explicit pick pays', async () => {
+    const up = await post('/api/documents', {
+      filename: 'audit-nocurrency.txt',
+      contentBase64: Buffer.from('Supplier: No Currency Co\nInvoice No.: NOC-11\nTotal 12.34').toString('base64'),
+    });
+    expect(up.supported).toBe(true);
+    expect(up.fields.amountCents).toBe(1234);
+    expect(up.fields.currency ?? '').toBe('');
+
+    const blocked = await post('/api/pay', {
+      requestId: rid('pay'), actor: 'audit',
+      facts: { ...up.fields, currency: '', factsSource: 'extracted' },
+    });
+    expect(blocked.outcome).toBe('invalid');
+
+    const paid2 = await post('/api/pay', {
+      requestId: rid('pay'), actor: 'audit',
+      facts: { ...up.fields, currency: 'EUR', factsSource: 'mixed' },
+    });
+    expect(paid2.outcome).toBe('recorded');
+    const s = await get('/api/state');
+    expect(s.payments.at(-1).currency).toBe('EUR');
+    expect(s.payments.at(-1).amountCents).toBe(1234);
+  });
+
   it('reset returns to the seeded state', async () => {
     const s = await post('/api/reset', {});
     expect(s.payments.length).toBe(1);

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  evaluateInvoice, normalizeFacts, normalizeInvoiceNumber, normalizeSupplier,
+  evaluateInvoice, factsSourceAfterEdit, normalizeFacts, normalizeInvoiceNumber, normalizeSupplier,
   validateFacts, monthToPeriod, displayPeriod, formatCents, payInvoice,
 } from '../engine/engine.mjs';
 import { extractFields, extractDocument } from '../engine/documents.mjs';
@@ -234,6 +234,47 @@ describe('extraction', () => {
     expect(found).toContain('supplier');
     expect(found).not.toContain('invoiceNumber');
     expect(found).not.toContain('period');
+  });
+
+  it('total without a currency code leaves currency unstated', () => {
+    const { fields, found } = extractFields('Supplier: No Cur Co\nInvoice No.: NC-7\nTotal 12.34');
+    expect(fields.amountCents).toBe(1234);
+    expect(fields.currency).toBeUndefined();
+    expect(found).not.toContain('currency');
+  });
+
+  it('missing currency cannot pay — no USD is assumed', async () => {
+    const store = memStore([paid]);
+    const r = await payInvoice(store, {
+      requestId: 'nc1', actor: 'manual',
+      facts: { supplier: 'No Cur Co', invoiceNumber: 'NC-7', amountCents: 1234, currency: '', factsSource: 'manual', docSupported: false },
+    });
+    expect(r.outcome).toBe('invalid');
+    expect(store.payments.length).toBe(1);
+    const v = await evaluateInvoice(
+      { supplier: 'No Cur Co', invoiceNumber: 'NC-7', amountCents: 1234, currency: '', factsSource: 'manual', docSupported: false },
+      store
+    );
+    expect(v.status).toBe('invalid');
+    expect(v.detail).toContain('Currency is required');
+  });
+
+  it('editing extracted/generated facts downgrades provenance to mixed', () => {
+    expect(factsSourceAfterEdit('extracted')).toBe('mixed');
+    expect(factsSourceAfterEdit('generated')).toBe('mixed');
+    expect(factsSourceAfterEdit('seed')).toBe('mixed');
+    expect(factsSourceAfterEdit('mixed')).toBe('mixed');
+    expect(factsSourceAfterEdit('manual')).toBe('manual');
+  });
+
+  it('mixed facts validate and disclose document + manual edits', async () => {
+    const store = memStore([paid]);
+    const v = await evaluateInvoice(
+      { ...base, invoiceNumber: 'INV-1043', period: '2026-10', factsSource: 'mixed' },
+      store
+    );
+    expect(v.status).toBe('clear');
+    expect(v.evidence.some((e) => e.label === 'Facts source' && /manual edits/.test(e.value))).toBe(true);
   });
 
   it('manually-entered incomplete facts cannot pay', async () => {

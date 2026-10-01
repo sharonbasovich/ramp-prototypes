@@ -73,10 +73,14 @@ facts are offered instead.
 
 A new document never retains facts from a previous or sample invoice:
 extraction fills only what the text states, everything else stays blank, and
-pay is blocked until supplier, invoice number and amount are verified. In the
-"Invoice (as received)" panel, uploads show their own extracted text as
-source evidence rather than a fabricated paper, and the billing-period
-control accepts any real month or "Not stated".
+pay is blocked until supplier, invoice number, amount **and currency** are
+verified. A total with no currency code leaves currency unstated — it must
+be picked explicitly; USD is never assumed. Editing extracted or sample
+facts marks the record "document + manual edits" rather than silently
+keeping the "extracted" label. In the "Invoice (as received)" panel,
+uploads show their own extracted text as source evidence rather than a
+fabricated paper, and the billing-period control accepts any real month
+or "Not stated".
 
 ## Integrity notes
 

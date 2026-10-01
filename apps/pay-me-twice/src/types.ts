@@ -5,7 +5,7 @@ export interface LineItem {
   amountCents: number;
 }
 
-export type FactsSource = 'seed' | 'extracted' | 'manual' | 'generated';
+export type FactsSource = 'seed' | 'extracted' | 'manual' | 'mixed' | 'generated';
 
 export interface InvoiceFacts {
   supplier: string;
