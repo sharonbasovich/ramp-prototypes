@@ -4,7 +4,7 @@ This is a review-only branch. No app code was changed and no builder fixes are d
 
 | App | Branch | First review | **Repaired head reviewed** | Port |
 |---|---|---|---|---|
-| Cart Tetris (+ root runner) | `codex/cart-tetris` PR1 | `1090a66` | **`b09cc5a`** | 5311 |
+| Cart Tetris (+ root runner) | `codex/cart-tetris` PR1 | `1090a66` | **`eb0122d`** | 5311 |
 | Budget Brawl | `codex/budget-brawl` PR2 | `32468be` | `32468be` (no repaired head pushed yet) | 5314 |
 | BorrowFirst | `codex/borrowfirst` PR3 | `e2942ab` | **`df48f9e`** | 5313 |
 | Pay Me Twice | `codex/pay-me-twice` PR4 | `2ef72e2` | **`a0b08c7`** | 5312 |
@@ -14,7 +14,7 @@ This is a review-only branch. No app code was changed and no builder fixes are d
 
 | App | npm ci | test | typecheck | build | /api/health |
 |---|---|---|---|---|---|
-| Cart `b09cc5a` | ok | 46/46, plus my 2-test independent oracle = 48/48 | ok | ok | sqlite |
+| Cart `eb0122d` | ok | 50/50 including my 2-test independent oracle | ok | ok | sqlite |
 | Pay `a0b08c7` | ok | 41/41 | ok | ok | sqlite |
 | Borrow `df48f9e` | ok | 47/47 | ok | ok | sqlite |
 | Budget `32468be` | ok | 21/21 | ok | ok | sqlite |
@@ -41,7 +41,7 @@ Static builds fall back to the "Browser sandbox" label; the console shows the ex
 | Item | Status |
 |---|---|
 | Cart: zero-price shipping and minimum orders, strict CSV/ID validation, irreversible approval, numeric ordering | Fixed. Verified by my oracle and junk-import probe; approval tests stay with the builder. |
-| Root runner on Windows (`spawnSync npm`, status `null`) | Fixed in `b09cc5a`: `npm_execpath` under the current Node, then `npm.cmd` with `shell` on win32, with `r.error` reported. Not run on a real Windows host. |
+| Root runner on Windows (`spawnSync npm`, status `null`) | Fixed in `b09cc5a`/`eb0122d`: `npm_execpath` under the current Node, then `npm.cmd` with `shell` on win32, with `r.error` reported. Not run on a real Windows host. |
 | Pay: missing fields, escaped PDF totals, 2026 fixtures, mobile overflow | Fixed. 390px `scrollWidth` is 390. |
 | Borrow: forced selection, server plan validation, restart persistence, confirmed-plan UI, mobile overflow | Fixed. After reserving, the panel shows Proposed $255 with Confirmed $255 (`screenshots/borrow-final-after-reserve.png`). 390px `scrollWidth` is 390. |
 | Budget: holds swept only on GET, Windows test teardown, "Prevented" counting pending requests | **Not reassessed.** No repaired head had been pushed when this was written. |
@@ -52,7 +52,7 @@ Static builds fall back to the "Browser sandbox" label; the console shows the ex
 1. **ExitLane: results don't fit in 1536×1024.** The page is 1650px tall. The content is centered at about 1120px wide, while the concept uses the full width. Only Room, Catering and part of Equipment show above the fold; Shuttle, Decor, Provider confirmations and Policy evidence are below it (`screenshots/exit-1536.png` vs `exitlane-concept.png`). Fix: widen the container to about 1460px, put the timezone select on the control row, and tighten table row padding.
 2. **ExitLane: confusing summary after execution.** Repro: Cancel → Review packet → Approve → Execute. "Estimated refundable" drops to **$0** while "Refunds due (estimated)" shows $550, and the "Provider-confirmed cancellations" value reads "recorded below" (`screenshots/exit-mobile.png`). A viewer reads $0 as "nothing recovered". Fix: keep $550 with a "now confirmed → due" label, and show the confirmed count as a number.
 3. **ExitLane: the `/packet/execute` response silently omits stale bookings.** After the clock advance, the result lists 3 bookings, and `bk-room` (stale) is missing instead of being reported as `refused: stale`. The UI or API consumer cannot tell "skipped" from "not in packet". Fix: return stale and excluded entries with a reason.
-4. **Root runner: `runStart` removes items from `list` while iterating it.** In `scripts/run-apps.mjs`, `list.splice(list.indexOf(slug), 1)` inside `for (const slug of list)` makes the next app skip its dist check. If app A fails to build, app B is started without a build. I reproduced the skip semantics in Node. Fix: iterate over a copy, or filter after the loop.
+4. ~~Root runner: `runStart` removes items from `list` while iterating it.~~ **Fixed in `eb0122d`**: builds now go into a separate `ready` list, and only built apps are started.
 
 **P3**
 - **Pay** (still present at `a0b08c7`): a missing currency is now rejected, but the API still accepts any 3-letter code — `POST /api/pay` with `currency:"XXX"` returns `recorded`. The UI offers only USD/EUR/GBP. Restrict the allowlist on the server.
