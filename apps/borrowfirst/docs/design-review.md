@@ -60,3 +60,23 @@ Compared `borrowfirst-concept.png` against
 `mobile-390.png` (390px): single-column stack, controls full width, table
 scrolls horizontally, all actions reachable — verified with live browser
 interaction, not just a resize.
+
+## Audit-fix pass (October 1)
+
+- Density tightened (header/hero/cards/fields/table) so the full three-card
+  flow plus the inventory table fit at 1536×1024: `.table-card` starts at
+  y685 (concept ~674), header + 4 inventory rows visible without scrolling.
+- `forced-use.png`: quantity 3 with M-102 forced via "Use" — proposed $280
+  (M-102 + M-101 + M-204, no purchases), honoring the forced asset and
+  reallocating the remainder at minimum cost without overfilling.
+- `kitchener-destination.png`: destination → Kitchener re-routes every
+  transfer (per-asset, per-destination routes in fixtures), yielding an
+  $80 all-internal plan instead of Waterloo's $255.
+- `desktop-reserved.png`: post-reserve the confirmed $255 plan stays as
+  the primary result while inventory rows correctly flip to Reserved —
+  no silent recompute to an all-new $675 proposal.
+- Header wraps (nav/mode chip/reset) so 390px has zero horizontal
+  overflow (`scrollWidth = clientWidth = 375`).
+- Port selector label corrected to "USB-C port" — a USB-C connector is
+  not evidence of power-delivery capability, so the option only claims
+  the port.

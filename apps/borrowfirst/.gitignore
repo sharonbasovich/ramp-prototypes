@@ -2,3 +2,5 @@ node_modules/
 dist/
 server-dist/
 *.tsbuildinfo
+server/*.db
+server/*.db-*

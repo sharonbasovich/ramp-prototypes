@@ -34,6 +34,7 @@ export interface Asset {
 
 export interface TransferOption {
   assetId: string;
+  destinationLocationId: string;
   costCents: number;
   currency: Currency;
   earliestArrival: string;
@@ -157,6 +158,11 @@ export type ReserveErrorCode =
   | 'UNCONFIRMED_ASSET'
   | 'QUOTE_EXPIRED'
   | 'STALE_QUOTE'
+  | 'QUOTE_DRIFT'
+  | 'TRANSFER_DRIFT'
+  | 'BASELINE_STALE'
+  | 'INCOMPLETE_PLAN'
+  | 'OVERFILLED_PLAN'
   | 'PLAN_MISMATCH'
   | 'CURRENCY_MISMATCH';
 

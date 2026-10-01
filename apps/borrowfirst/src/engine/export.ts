@@ -108,6 +108,7 @@ export function exportToCsv(doc: ExportDocument): string {
     '# ' + doc.disclosure,
     'kind,id,label,quantity,unit_cost,line_cost,arrival_or_delivery,detail',
   ];
+  const fmt = (cents: number) => formatCents(cents, doc.request.currency as 'CAD' | 'USD');
   for (const t of doc.transfers) {
     lines.push(
       `transfer,${t.assetId},${csvCell(t.assetName)},1,${fmt(t.costCents)},${fmt(t.costCents)},${t.earliestArrival},${csvCell(`${t.fromLocation} → ${t.toLocation}${t.reservationId ? ` · reservation ${t.reservationId}` : ''}`)}`,
@@ -132,10 +133,6 @@ export function exportToCsv(doc: ExportDocument): string {
     lines.push(`summary,unfulfilled_shortage,${doc.shortage} unit(s),,,,,`);
   }
   return lines.join('\n') + '\n';
-}
-
-function fmt(cents: number): string {
-  return formatCents(cents, 'CAD');
 }
 
 function csvCell(s: string): string {
