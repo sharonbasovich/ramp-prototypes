@@ -1,0 +1,7 @@
+{
+  "source": "https://www.six-group.com/dam/download/financial-information/data-center/iso-currrency/lists/list-one.xml",
+  "maintainer": "SIX, ISO 4217 Maintenance Agency",
+  "verifiedOn": "2026-10-01",
+  "scope": "Selected arithmetic examples only; inclusion does not imply Ramp payment support",
+  "minorUnitDigits": { "USD": 2, "CAD": 2, "EUR": 2, "GBP": 2, "JPY": 0, "KWD": 3 }
+}

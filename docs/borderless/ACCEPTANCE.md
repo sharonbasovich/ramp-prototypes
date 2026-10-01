@@ -16,11 +16,11 @@ The one app contains Currency Check (`#check`), FX Guard (`#guard`, default), an
 
 ## Currency Check: direct parsing cases
 
-These are direct engine calls, not only UI scenario buttons. `numericFormat` is independent of `nativeCurrency`. If the implementation uses different field names, adapt the invocation while preserving these two independent inputs. The native/reporting currency does not provide missing invoice currency evidence.
+These are direct engine calls, not only UI scenario buttons. Invoice currency evidence and `numericFormat` are independent inputs. The native/reporting currency column below is optional surrounding context only: if the parser has no such field, omit it from the invocation rather than introducing one. If present elsewhere in the app, it does not provide missing invoice currency evidence or select a numeric format. Do not infer functional/native currency from entity country.
 
-| Invoice currency evidence | Native currency | Numeric format | Exact original amount | Expected result |
+| Invoice currency evidence | Optional native/reporting context | Numeric format | Exact original amount | Expected result |
 | --- | --- | --- | --- | --- |
-| ISO USD | CAD | en-US | `1,234.56` | Accept USD `123456` minor units; preserve CAD as the native currency. |
+| ISO USD | CAD | en-US | `1,234.56` | Accept USD `123456` minor units; optional CAD context does not change the invoice currency. |
 | ISO EUR | USD | de-DE | `1.234,56` | Accept EUR `123456`; no multiplication/division caused by native currency. |
 | ISO EUR | CAD | fr-FR | `1 234,56` (U+202F grouping) | Accept EUR `123456`. |
 | ISO EUR | CAD | fr-FR | `1 234,56` (U+00A0 grouping) | Accept EUR `123456` if both supported French grouping spaces are documented; otherwise reject explicitly. Never interpret as `1234` or `12345600`. |
@@ -44,7 +44,7 @@ Adversarial rejections, with no partial regex matches: `12,34.56` under en-US, `
 
 Test a value larger than JavaScript's safe integer, such as USD literal `90071992547409.93` -> minor string `9007199254740993`. The engine must either preserve it exactly or reject it under an explicit documented size limit; a rounded or neighboring integer fails. Numeric amount fields imported from JSON must not silently lose precision before validation.
 
-Required browser flow: import the ambiguous KWD `1,234` fixture, observe the hold, choose de-DE, obtain KWD `1.234`, switch to en-US, obtain KWD `1,234.000`, and inspect the changed minor-unit evidence. Import the `$` fixture, resolve CAD, and export original text, ISO currency, numeric format, resolved minor units, and provenance. Changing only native/reporting currency must not change the invoice's original amount or ISO currency.
+Required browser flow: import the ambiguous KWD `1,234` fixture, observe the hold, choose de-DE, obtain KWD `1.234`, switch to en-US, obtain KWD `1,234.000`, and inspect the changed minor-unit evidence. Import the `$` fixture, resolve CAD, and export original text, ISO currency, numeric format, resolved minor units, and provenance. If the app exposes native/reporting currency, changing only that context must not change the invoice's original amount or ISO currency. Its absence from the parser does not fail this oracle.
 
 ## Exact FX and half-even oracle
 
@@ -113,16 +113,19 @@ Required recomputation and rejection cases:
 
 ## Funding route and native-currency boundaries
 
-These direct policy calls must be independent of the invoice parser and rate arithmetic. The sandbox's documented simplified Canada route uses native CAD funding:
+These direct policy calls must be independent of the invoice parser and rate arithmetic. For this product the documented Canada restriction concerns **CAD funding**, not the entity's accounting functional/native currency. Do not infer functional/native currency from country or reject a Canadian entity merely because its functional/native currency is USD.
 
-| Entity country | Native currency | Funding currency | Expected route decision |
+A successful result below means **simplified funding-currency preflight passed**, not full verified product eligibility. A potentially available CAD route still assumes independently verified eligibility, including an eligible Ontario business, the required ERP/vendor conditions, and payment on behalf of the entity itself. The sandbox does not verify those prerequisites.
+
+| Entity country | Optional functional/native context | Funding currency | Expected preflight decision |
 | --- | --- | --- | --- |
-| Canada / CA | CAD | USD | Block: this simplified Canada route requires CAD funding. No approval or commit despite a mathematically valid USD conversion. |
-| Canada / CA | CAD | CAD | Route valid under the documented simplified policy, subject to the other amount/quote/budget checks. |
-| Canada / CA | USD | USD | Reject the inconsistent native-currency configuration; do not bypass the Canada rule by editing `nativeCurrency`. |
+| Canada / CA | CAD | USD | Block because funding is USD: this simplified product preflight requires CAD funding. No approval or commit despite a mathematically valid USD conversion. |
+| Canada / CA | CAD | CAD | Simplified funding-currency preflight passed; full eligibility is unverified, and other amount/quote/budget checks still apply. |
+| Canada / CA | USD | CAD | Simplified funding-currency preflight passed. Native USD is not a reason to reject; full eligibility remains unverified. |
+| Canada / CA | USD | USD | Block because funding is USD, not because native USD is inconsistent with Canada. |
 | Canada / CA | CAD | KWD | Block unsupported sandbox funding route. Generic KWD parsing/conversion is not a route-support claim. |
 
-The UI must describe this as a simplified documented sandbox route and distinguish entity/native currency, invoice currency, reporting currency, and funding currency. Successful generic ISO arithmetic alone must never imply Ramp supports that currency or route. Export must include the native/funding currencies and route decision, not only a converted total.
+The UI must describe this as a simplified documented funding-currency preflight and distinguish entity country, functional/native currency when present, invoice currency, reporting currency, and funding currency. Successful generic ISO arithmetic alone must never imply Ramp supports that currency or route. Export must include funding currency, the preflight decision, and any functional/native currency actually supplied by the app, not only a converted total. It must not invent a functional/native currency or present a preflight pass as verified full eligibility.
 
 ## Browser completion and evidence
 
