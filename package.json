@@ -6,6 +6,7 @@
   "description": "Five working time-and-money prototypes for a private Ramp event",
   "scripts": {
     "setup": "node scripts/run-apps.mjs ci",
+    "typecheck": "node scripts/run-apps.mjs typecheck",
     "test": "node scripts/run-apps.mjs test",
     "build": "node scripts/run-apps.mjs build",
     "start": "node scripts/run-apps.mjs start",

@@ -27,7 +27,9 @@ Requires Node 22.x (uses built-in `node:sqlite`; Node 22.14 verified).
 2. "Find the cheapest order" runs the exact solver and the cheapest feasible
    single-vendor baseline side by side with itemized breakdowns.
 3. Edit vendor quotes inline, or import JSON/CSV (validated before replacing;
-   downloadable template).
+   downloadable template). CSV requires explicit `currency` (USD),
+   `quoted_at`, and `valid_until` columns on every row — provenance is never
+   invented or defaulted.
 4. Approve the plan — any later input change voids the approval — then export a
    fully itemized JSON or CSV purchase plan with provenance and assumptions.
 

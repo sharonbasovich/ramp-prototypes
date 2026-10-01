@@ -3,7 +3,7 @@
 // command inside each. Apps that have not landed yet are skipped, so this
 // works while sibling builders deliver their directories.
 // Usage: node scripts/run-apps.mjs ci|test|build|start|hub
-import { readdirSync, existsSync } from 'node:fs';
+import { readdirSync, existsSync, readFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -52,6 +52,8 @@ function npmCmd(slug) {
   switch (cmd) {
     case 'ci':
       return existsSync(join(APPS_DIR, slug, 'package-lock.json')) ? ['ci'] : ['install'];
+    case 'typecheck':
+      return ['run', 'typecheck', '--if-present'];
     case 'test':
       return ['test'];
     case 'build':
@@ -90,6 +92,21 @@ function runSequential() {
   return failed === 0 ? 0 : 1;
 }
 
+function nodeStartLaunch(slug) {
+  try {
+    const pkg = JSON.parse(readFileSync(join(APPS_DIR, slug, 'package.json'), 'utf8'));
+    const m = /^node\s+(.+)$/.exec(pkg?.scripts?.start ?? '');
+    if (!m) return null;
+    return {
+      command: process.execPath,
+      args: m[1].trim().split(/\s+/),
+      shell: false,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function runStart() {
   const list = apps();
   if (list.length === 0) {
@@ -119,7 +136,10 @@ function runStart() {
   for (const slug of list) {
     const port = PORTS[slug] ?? '????';
     console.log(`  ${slug.padEnd(14)} http://localhost:${port}`);
-    const launch = npmLaunch(['start']);
+    // When the app's start script is a plain `node <file>` invocation, spawn
+    // Node directly — the child IS the server and can be killed cleanly on
+    // every platform. Fall back to the npm launcher otherwise.
+    const launch = nodeStartLaunch(slug) ?? npmLaunch(['start']);
     const k = spawn(launch.command, launch.args, {
       cwd: join(APPS_DIR, slug),
       stdio: ['ignore', 'inherit', 'inherit'],
@@ -129,7 +149,16 @@ function runStart() {
     k.on('error', (e) => console.error(`${slug}: cannot start npm: ${e.message}`));
     kids.push(k);
   }
-  const stop = () => kids.forEach((k) => k.kill('SIGTERM'));
+  // Killing an npm wrapper can orphan the real server process on Windows;
+  // kill the whole tree there.
+  const killKid = (k) => {
+    if (process.platform === 'win32') {
+      spawnSync('taskkill', ['/pid', String(k.pid), '/t', '/f'], { stdio: 'ignore' });
+    } else {
+      k.kill('SIGTERM');
+    }
+  };
+  const stop = () => kids.forEach(killKid);
   process.on('SIGINT', () => {
     stop();
     process.exit(0);
