@@ -16,6 +16,13 @@ class LocalStorageShim {
   clear() { this.map.clear(); }
 }
 
+class BlockedStorageShim {
+  getItem() { return null; }
+  setItem() { throw new Error('QuotaExceededError'); }
+  removeItem() { throw new Error('QuotaExceededError'); }
+  clear() { throw new Error('QuotaExceededError'); }
+}
+
 beforeEach(() => {
   (globalThis as Record<string, unknown>).localStorage = new LocalStorageShim();
 });
@@ -79,5 +86,27 @@ describe('B14 — reset and export fidelity in sandbox', () => {
     const again = await store.reserve({ ...request, id: 'req-2' }, plan);
     expect(again.ok).toBe(false);
     expect(again.failures.some((f) => f.code === 'ASSET_RESERVED')).toBe(true);
+  });
+
+  it('blocked storage keeps instance memory: confirm → reserve → export all work', async () => {
+    (globalThis as Record<string, unknown>).localStorage = new BlockedStorageShim();
+    const store = new SandboxStore();
+    store.load();
+    store.ownerConfirm('M-204');
+    const w = store.load();
+    // Without the in-memory fallback this would silently reseed to v1/null.
+    expect(w.assets.find((a) => a.id === 'M-204')?.ownerConfirmedAt).not.toBeNull();
+    const request = defaultRequest();
+    const plan = allocate(request, w, DEMO_NOW);
+    const ok = await store.reserve(request, plan);
+    expect(ok.ok).toBe(true);
+    expect(ok.reservations).toHaveLength(2);
+    // Reservations persist within the instance too — a second load sees them.
+    const after = store.load();
+    expect(after.reservations.filter((r) => r.status === 'confirmed')).toHaveLength(2);
+    const doc = buildExport(plan, after, ok.reservations, 'sandbox', DEMO_NOW);
+    expect(doc.transfers.every((t) => t.reservationId !== null)).toBe(true);
+    const csv = exportToCsv(doc);
+    expect(csv).toContain('rsv-');
   });
 });

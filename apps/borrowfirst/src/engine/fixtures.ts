@@ -3,7 +3,11 @@
 // booking. The demo clock is fixed at an explicit instant so the whole flow
 // is reproducible (reset always restores this exact state).
 
-import type { EquipmentRequest, World } from './types.js';
+import type { EquipmentRequest, TransferOption, World } from './types.js';
+
+function tr(assetId: string, destinationLocationId: string, costCents: number, earliestArrival: string): TransferOption {
+  return { assetId, destinationLocationId, costCents, currency: 'CAD', earliestArrival };
+}
 
 // Demo "now": Wednesday 2026-09-30, 14:00 in Waterloo (America/Toronto).
 export const DEMO_NOW = '2026-09-30T18:00:00.000Z';
@@ -109,19 +113,39 @@ export function seedWorld(): World {
         version: 1,
       },
     ],
+    // Transfer routes are per (asset, destination): a same-office move is
+    // cheap and same-day, cross-office courier costs more and arrives later.
+    // M-102's handling fee ($250) deliberately costs more than buying new
+    // ($225) — the engine only picks it when cheaper spares cannot arrive
+    // in time.
     transferOptions: [
-      // Same-office transfers arrive the same day.
-      { assetId: 'M-101', costCents: 1500, currency: 'CAD', earliestArrival: '2026-09-30T19:00:00.000Z' },
-      // M-102 is available today but its handling/transfer fee ($250) costs
-      // more than buying new ($225) — the engine only picks it when the
-      // cheaper spares cannot meet the deadline.
-      { assetId: 'M-102', costCents: 25000, currency: 'CAD', earliestArrival: '2026-09-30T19:00:00.000Z' },
-      // Kitchener → Waterloo courier arrives Friday 16:00: fine for a Friday
-      // deadline, too late for tomorrow.
-      { assetId: 'M-204', costCents: 1500, currency: 'CAD', earliestArrival: '2026-10-02T20:00:00.000Z' },
-      { assetId: 'M-305', costCents: 2000, currency: 'CAD', earliestArrival: '2026-10-02T20:00:00.000Z' },
-      { assetId: 'M-306', costCents: 1500, currency: 'CAD', earliestArrival: '2026-10-06T13:00:00.000Z' },
-      { assetId: 'M-112', costCents: 1500, currency: 'CAD', earliestArrival: '2026-09-30T19:00:00.000Z' },
+      // M-101 — Waterloo
+      tr('M-101', 'loc-waterloo', 1500, '2026-09-30T19:00:00.000Z'),
+      tr('M-101', 'loc-kitchener', 6000, '2026-10-02T20:00:00.000Z'),
+      tr('M-101', 'loc-toronto', 6000, '2026-10-02T20:00:00.000Z'),
+      // M-102 — Waterloo
+      tr('M-102', 'loc-waterloo', 25000, '2026-09-30T19:00:00.000Z'),
+      tr('M-102', 'loc-kitchener', 27000, '2026-09-30T19:00:00.000Z'),
+      tr('M-102', 'loc-toronto', 27000, '2026-09-30T19:00:00.000Z'),
+      // M-204 — Kitchener: Kitchener→Waterloo courier arrives Friday 16:00,
+      // fine for a Friday deadline but too late for tomorrow; the local
+      // Kitchener move is same-day.
+      tr('M-204', 'loc-waterloo', 1500, '2026-10-02T20:00:00.000Z'),
+      tr('M-204', 'loc-kitchener', 1000, '2026-09-30T19:00:00.000Z'),
+      tr('M-204', 'loc-toronto', 4000, '2026-10-02T20:00:00.000Z'),
+      // M-305 — Toronto (in use anyway)
+      tr('M-305', 'loc-waterloo', 2000, '2026-10-02T20:00:00.000Z'),
+      tr('M-305', 'loc-kitchener', 3000, '2026-10-02T20:00:00.000Z'),
+      tr('M-305', 'loc-toronto', 500, '2026-09-30T19:00:00.000Z'),
+      // M-306 — Kitchener: courier to Waterloo only runs next Tuesday, but
+      // the local Kitchener move is same-day — destination changes the plan.
+      tr('M-306', 'loc-waterloo', 1500, '2026-10-06T13:00:00.000Z'),
+      tr('M-306', 'loc-kitchener', 1000, '2026-09-30T19:00:00.000Z'),
+      tr('M-306', 'loc-toronto', 4500, '2026-10-06T13:00:00.000Z'),
+      // M-112 — Waterloo (damaged; routes exist but the asset is excluded)
+      tr('M-112', 'loc-waterloo', 1500, '2026-09-30T19:00:00.000Z'),
+      tr('M-112', 'loc-kitchener', 5000, '2026-10-02T20:00:00.000Z'),
+      tr('M-112', 'loc-toronto', 5000, '2026-10-02T20:00:00.000Z'),
     ],
     purchaseOptions: [
       {

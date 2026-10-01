@@ -14,18 +14,31 @@ import { defaultRequest, seedWorld, DEMO_NOW } from '../src/engine/fixtures';
 import type { EquipmentRequest } from '../src/engine/types';
 
 const dirs: string[] = [];
+const stores: BorrowFirstStore[] = [];
 function tempDb() {
   const dir = mkdtempSync(join(tmpdir(), 'borrowfirst-'));
   dirs.push(dir);
   return join(dir, 'test.db');
 }
-afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
+afterAll(() => {
+  // Close every handle before removing dirs — on Windows an open file
+  // fails teardown with EBUSY even when all assertions passed.
+  for (const s of stores) {
+    try {
+      s.close();
+    } catch {
+      // already closed
+    }
+  }
+  dirs.forEach((d) => rmSync(d, { recursive: true, force: true }));
+});
 
 const seed = seedWorld();
 const LOCATIONS = seed.locations;
 
 function freshStore(path?: string) {
   const store = new BorrowFirstStore(path ?? tempDb());
+  stores.push(store);
   store.reset(seed);
   return store;
 }
@@ -103,6 +116,7 @@ describe('B04 — two clients race the same asset', () => {
         const seed = seedWorld();
         const store = new BorrowFirstStore(workerData.dbPath);
         const result = store.reserve(workerData.request, workerData.plan, seed.locations, DEMO_NOW, DEMO_NOW);
+        store.close();
         parentPort.postMessage(result);
       })();
     `;
@@ -121,6 +135,7 @@ describe('B04 — two clients race the same asset', () => {
     );
     expect(results.filter((r) => r.ok)).toHaveLength(1);
     const final = new BorrowFirstStore(path); // inspect without reseeding
+    stores.push(final);
     const active = final
       .loadWorld(LOCATIONS, DEMO_NOW)
       .reservations.filter((r) => r.status === 'confirmed');

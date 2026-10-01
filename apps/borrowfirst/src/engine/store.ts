@@ -35,10 +35,12 @@ CREATE TABLE IF NOT EXISTS assets (
   version INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS transfer_options (
-  asset_id TEXT PRIMARY KEY REFERENCES assets(id),
+  asset_id TEXT NOT NULL REFERENCES assets(id),
+  destination_location_id TEXT NOT NULL,
   cost_cents INTEGER NOT NULL,
   currency TEXT NOT NULL,
-  earliest_arrival TEXT NOT NULL
+  earliest_arrival TEXT NOT NULL,
+  PRIMARY KEY (asset_id, destination_location_id)
 );
 CREATE TABLE IF NOT EXISTS purchase_options (
   id TEXT PRIMARY KEY,
@@ -122,10 +124,10 @@ export class BorrowFirstStore {
         );
       }
       const insTransfer = this.db.prepare(
-        `INSERT INTO transfer_options (asset_id, cost_cents, currency, earliest_arrival) VALUES (?, ?, ?, ?)`,
+        `INSERT INTO transfer_options (asset_id, destination_location_id, cost_cents, currency, earliest_arrival) VALUES (?, ?, ?, ?, ?)`,
       );
       for (const t of world.transferOptions) {
-        insTransfer.run(t.assetId, t.costCents, t.currency, t.earliestArrival);
+        insTransfer.run(t.assetId, t.destinationLocationId, t.costCents, t.currency, t.earliestArrival);
       }
       const insPo = this.db.prepare(
         `INSERT INTO purchase_options (id, label, category, size_inches, ports, unit_cost_cents, flat_shipping_cents, max_quantity, currency, delivery_instant, provenance, expires_at, version)
@@ -182,11 +184,18 @@ export class BorrowFirstStore {
   }
 
   insertHold(assetId: string, requestId: string, expiresAt: string, now: string): Reservation {
+    const parsed = Date.parse(expiresAt);
+    if (Number.isNaN(parsed)) {
+      throw new Error(`expiresAt is not a parseable date-time: ${expiresAt}`);
+    }
+    // Canonical UTC storage — the epoch sweep and the engine compare the
+    // same instant regardless of the offset the caller used.
+    const canonical = new Date(parsed).toISOString();
     const id = `hold-${requestId}-${assetId}`;
     this.db
       .prepare(`INSERT INTO reservations (id, asset_id, request_id, status, expires_at, created_at) VALUES (?, ?, ?, 'held', ?, ?)`)
-      .run(id, assetId, requestId, expiresAt, now);
-    return { id, assetId, requestId, status: 'held', expiresAt, createdAt: now };
+      .run(id, assetId, requestId, canonical, now);
+    return { id, assetId, requestId, status: 'held', expiresAt: canonical, createdAt: now };
   }
 
   importRows(assets: Asset[], transfers: TransferOption[]): void {
@@ -195,7 +204,7 @@ export class BorrowFirstStore {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'imported', 1)`,
     );
     const insTransfer = this.db.prepare(
-      `INSERT INTO transfer_options (asset_id, cost_cents, currency, earliest_arrival) VALUES (?, ?, ?, ?)`,
+      `INSERT INTO transfer_options (asset_id, destination_location_id, cost_cents, currency, earliest_arrival) VALUES (?, ?, ?, ?, ?)`,
     );
     this.db.exec('BEGIN');
     try {
@@ -206,7 +215,7 @@ export class BorrowFirstStore {
           a.ownerConfirmationRequired ? 1 : 0,
         );
       }
-      for (const t of transfers) insTransfer.run(t.assetId, t.costCents, t.currency, t.earliestArrival);
+      for (const t of transfers) insTransfer.run(t.assetId, t.destinationLocationId, t.costCents, t.currency, t.earliestArrival);
       this.db.exec('COMMIT');
     } catch (err) {
       this.db.exec('ROLLBACK');
@@ -218,6 +227,18 @@ export class BorrowFirstStore {
   // inventory inside BEGIN IMMEDIATE, then insert all asset reservations
   // together. Any stale, conflicting, or conditional line rejects the whole
   // plan — the caller recalculates instead of keeping a partial hold.
+  // Seed only an empty database — a file-backed store keeps reservations,
+  // owner confirmations and imports across restarts; only an explicit
+  // reset() (the sandbox "Reset demo" path) restores fixtures.
+  ensureSeeded(world: World = seedWorld()): void {
+    const row = this.db.prepare('SELECT COUNT(*) AS n FROM assets').get() as { n: number };
+    if (Number(row.n) === 0) this.reset(world);
+  }
+
+  close(): void {
+    this.db.close();
+  }
+
   reserve(
     request: EquipmentRequest,
     plan: AllocationPlan,
@@ -228,10 +249,12 @@ export class BorrowFirstStore {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       // Sweep expired holds inside the transaction so the partial unique
-      // index only ever holds genuinely active rows.
+      // index only ever holds genuinely active rows. Compare parsed UTC
+      // epochs — ISO strings with different offsets do not sort
+      // lexicographically by instant ('16:00-04:00' is later than '18:00Z').
       this.db
         .prepare(
-          `UPDATE reservations SET status = 'expired' WHERE status = 'held' AND expires_at IS NOT NULL AND expires_at <= ?`,
+          `UPDATE reservations SET status = 'expired' WHERE status = 'held' AND expires_at IS NOT NULL AND unixepoch(replace(expires_at, 'Z', '+00:00')) <= unixepoch(replace(?, 'Z', '+00:00'))`,
         )
         .run(now);
       const world = this.loadWorld(locations, demoNow);
@@ -301,6 +324,7 @@ function rowToAsset(r: Record<string, unknown>): Asset {
 function rowToTransfer(r: Record<string, unknown>): TransferOption {
   return {
     assetId: String(r.asset_id),
+    destinationLocationId: String(r.destination_location_id),
     costCents: Number(r.cost_cents),
     currency: r.currency as TransferOption['currency'],
     earliestArrival: String(r.earliest_arrival),

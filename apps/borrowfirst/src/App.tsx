@@ -207,6 +207,13 @@ export default function App() {
     }
   };
 
+  // After a successful reserve, the confirmed plan stays on screen as the
+  // primary result — the live plan recomputes against reduced inventory,
+  // which would misleadingly suggest an all-new purchase. Any new input
+  // clears `confirmed` and returns the live plan. The inventory table
+  // keeps the live plan so rows correctly show Reserved chips.
+  const shownPlan = confirmed?.plan ?? plan;
+
   return (
     <div className="app-shell">
       <Header
@@ -248,7 +255,7 @@ export default function App() {
             )}
             {world && (
               <AllocationPanel
-                plan={plan}
+                plan={shownPlan}
                 world={world}
                 excludedAssets={excludedAssets}
                 excludedQuotes={excludedQuotes}
@@ -258,7 +265,7 @@ export default function App() {
               />
             )}
             <ReviewPanel
-              plan={plan}
+              plan={shownPlan}
               busy={busy}
               reserveFailures={reserveFailures}
               confirmedReservations={confirmed?.reservations ?? []}

@@ -22,15 +22,26 @@ interface Persisted {
 }
 
 export class SandboxStore {
+  // In-memory fallback for when localStorage is blocked or throws —
+  // state then lives only for this instance's lifetime, never reseeding
+  // silently between calls.
+  private memoryWorld: World | null = null;
+
   load(): World {
+    // Always hand out a copy — callers mutate the world then pass it to
+    // persist(); returning memoryWorld itself would corrupt the cache.
+    if (this.memoryWorld) return structuredClone(this.memoryWorld);
     try {
       const raw = localStorage.getItem(KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as Persisted;
-        if (parsed.world && Array.isArray(parsed.world.assets)) return parsed.world;
+        if (parsed.world && Array.isArray(parsed.world.assets)) {
+          this.memoryWorld = parsed.world;
+          return structuredClone(this.memoryWorld);
+        }
       }
     } catch {
-      // corrupted state falls through to reseed
+      // storage unavailable — fall back to instance memory below
     }
     const world = seedWorld();
     this.persist(world);
@@ -38,10 +49,11 @@ export class SandboxStore {
   }
 
   private persist(world: World): void {
+    this.memoryWorld = structuredClone(world);
     try {
       localStorage.setItem(KEY, JSON.stringify({ world }));
     } catch {
-      // storage full/blocked — keep running in memory for this session
+      // storage full/blocked — instance memory still holds the state
     }
   }
 
@@ -69,6 +81,17 @@ export class SandboxStore {
     this.persist(world);
   }
 
+  // Sweep expired holds before evaluating — same rule as the server,
+  // but the comparison is Date-parsed instants (offsets handled).
+  private sweepExpiredHolds(world: World): void {
+    const n = Date.parse(world.demoNow);
+    for (const r of world.reservations) {
+      if (r.status === 'held' && r.expiresAt !== null && Date.parse(r.expiresAt) <= n) {
+        r.status = 'expired';
+      }
+    }
+  }
+
   // Same revalidation as the SQLite transaction, serialized by a Web Lock
   // when available so overlapping writes in this browser cannot interleave.
   async reserve(
@@ -77,6 +100,7 @@ export class SandboxStore {
   ): Promise<{ ok: boolean; reservations: Reservation[]; failures: import('../engine/types').ReserveFailure[]; world: World }> {
     const doReserve = () => {
       const world = this.load();
+      this.sweepExpiredHolds(world);
       const failures = validateReservation(plan, world, DEMO_NOW);
       if (failures.length > 0) return { ok: false as const, reservations: [], failures, world };
       const created: Reservation[] = plan.transfers.map((l) => ({

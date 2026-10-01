@@ -20,14 +20,18 @@ npm start          # builds, then serves the app + API on http://localhost:5313
 ```
 
 - `npm run dev` — Vite dev server on :5314, proxies `/api` to :5313
-- `npm run test` — `tsc` server build + `vitest run` (22 tests)
+- `npm run test` — `tsc` server build + `vitest run` (43 tests)
 - `npm run typecheck` — client + server typecheck
 - `npm run build` — `tsc -p tsconfig.server.json` + `vite build`
 - `npm run preview` — serve `dist/` statically (forces Browser sandbox mode)
 
-`BORROWFIRST_DB=/path/to/file.db` persists the SQLite database; default is
-in-memory. The demo clock is fixed at `2026-09-30T18:00:00Z` (Wednesday,
-14:00 America/Toronto) so seeded arrivals and deadlines are deterministic.
+The SQLite store defaults to a durable `server/borrowfirst.db` (gitignored),
+so reservations, owner confirmations and imports survive restarts.
+`BORROWFIRST_DB=:memory:` opts into ephemeral mode; fixtures are seeded only
+into an empty database — the header's Reset button (`/api/reset`) is the only
+path that wipes rows and restores fixtures. The demo clock is fixed at
+`2026-09-30T18:00:00Z` (Wednesday, 14:00 America/Toronto) so seeded arrivals
+and deadlines are deterministic.
 
 ## Two honest modes — label is always visible
 

@@ -17,11 +17,13 @@ import { buildExport } from '../server-dist/export.js';
 const PORT = Number(process.env.PORT || 5313);
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const DIST = join(ROOT, '..', 'dist');
-const DB_PATH = process.env.BORROWFIRST_DB || ':memory:';
+// Durable task-local default so reservations and owner confirmations
+// survive restarts; BORROWFIRST_DB=:memory: opts into ephemeral mode.
+const DB_PATH = process.env.BORROWFIRST_DB || join(ROOT, 'borrowfirst.db');
 
 const seed = seedWorld();
 const store = new BorrowFirstStore(DB_PATH);
-store.reset(seed);
+store.ensureSeeded(seed);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -107,8 +109,27 @@ const server = createServer(async (req, res) => {
       if (!body || typeof body.assetId !== 'string' || typeof body.expiresAt !== 'string') {
         return sendJson(res, 400, { error: 'assetId and expiresAt required' });
       }
-      const r = store.insertHold(body.assetId, body.requestId || 'req-x', body.expiresAt, DEMO_NOW);
-      return sendJson(res, 200, { hold: r });
+      const expiry = Date.parse(body.expiresAt);
+      if (Number.isNaN(expiry)) {
+        return sendJson(res, 400, { error: 'expiresAt is not a parseable date-time' });
+      }
+      try {
+        // Normalize to a canonical UTC instant so offsets cannot desync
+        // storage from epoch comparisons.
+        const r = store.insertHold(
+          body.assetId,
+          body.requestId || 'req-x',
+          new Date(expiry).toISOString(),
+          DEMO_NOW,
+        );
+        return sendJson(res, 200, { hold: r });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('UNIQUE') || msg.includes('constraint')) {
+          return sendJson(res, 409, { error: `asset ${body.assetId} already has an active reservation` });
+        }
+        throw err;
+      }
     }
 
     if (path === '/api/import' && req.method === 'POST') {
@@ -165,3 +186,11 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`BorrowFirst sandbox server on http://localhost:${PORT} (db: ${DB_PATH === ':memory:' ? 'in-memory' : DB_PATH})`);
 });
+
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => {
+    server.close();
+    store.close();
+    process.exit(0);
+  });
+}

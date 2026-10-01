@@ -11,7 +11,7 @@ interface Props {
 const PORT_OPTIONS: { label: string; ports: string[] }[] = [
   { label: 'HDMI', ports: ['HDMI'] },
   { label: 'HDMI + DisplayPort', ports: ['HDMI', 'DisplayPort'] },
-  { label: 'USB-C power delivery', ports: ['USB-C'] },
+  { label: 'USB-C port', ports: ['USB-C'] },
 ];
 
 export default function RequestPanel({ request, locations, onChange, onFind }: Props) {

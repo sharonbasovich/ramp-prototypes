@@ -2,8 +2,10 @@
 // source: 'imported' so they are always distinguishable from fixtures.
 // Expected header:
 // id,name,size_inches,ports,location,owner,condition,availability,
-// owner_confirm_required,transfer_cost_cents,earliest_arrival
+// owner_confirm_required,transfer_cost_cents,earliest_arrival[,destination]
 // ports: semicolon-separated, e.g. "HDMI;DisplayPort"
+// destination (optional): location id/name the quoted transfer cost
+// applies to; defaults to the asset's own office (a local move).
 
 import type { Asset, TransferOption, World } from './types.js';
 
@@ -87,6 +89,19 @@ export function parseAssetCsv(text: string, world: World): ImportResult {
       errors.push(`Line ${lineNo}: earliest_arrival is not a parseable date: "${arrival}"`);
       continue;
     }
+    const destKey = (row['destination'] || '').toLowerCase();
+    let destinationLocationId = locationId; // default: local move at own office
+    if (destKey) {
+      const dest =
+        LOCATIONS[destKey] ??
+        world.locations.find((l) => l.name.toLowerCase() === destKey)?.id ??
+        (knownLocationIds.has(row['destination']) ? row['destination'] : '');
+      if (!dest) {
+        errors.push(`Line ${lineNo}: unknown destination "${row['destination']}"`);
+        continue;
+      }
+      destinationLocationId = dest;
+    }
     seen.add(id);
     assets.push({
       id,
@@ -102,7 +117,13 @@ export function parseAssetCsv(text: string, world: World): ImportResult {
       source: 'imported',
       version: 1,
     });
-    transfers.push({ assetId: id, costCents, currency: 'CAD', earliestArrival: arrival });
+    transfers.push({
+      assetId: id,
+      destinationLocationId,
+      costCents,
+      currency: 'CAD',
+      earliestArrival: arrival,
+    });
   }
   return { assets, transfers, errors };
 }

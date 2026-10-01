@@ -73,7 +73,7 @@ describe('B03 — remote spare arriving one minute late', () => {
       ownerConfirmationRequired: false, ownerConfirmedAt: null, source: 'fixture', version: 1,
     };
     const t: TransferOption = {
-      assetId: 'M-999', costCents: 0, currency: 'CAD',
+      assetId: 'M-999', destinationLocationId: 'loc-waterloo', costCents: 0, currency: 'CAD',
       earliestArrival: '2026-10-02T21:01:00.000Z', // one minute after Friday 17:00
     };
     const w = worldWith({ assets: [...world.assets, late], transferOptions: [...world.transferOptions, t] });
