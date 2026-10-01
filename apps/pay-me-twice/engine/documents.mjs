@@ -15,9 +15,9 @@ export const BASE_INVOICE = {
   invoiceNumber: 'INV-1042',
   currency: 'USD',
   amountCents: 48000,
-  period: '2024-09',
-  issueDate: 'Sep 1, 2024',
-  dueDate: 'Sep 30, 2024',
+  period: '2026-09',
+  issueDate: 'Sep 1, 2026',
+  dueDate: 'Sep 30, 2026',
   supplierAddress: '123 Market Street\nPortland, OR 97204\nhello@northlinestudio.co',
   billTo: 'Acme Co\n456 Pine Street\nSan Francisco, CA 94105',
   items: [{ description: 'Creative services', qty: 1, rateCents: 48000, amountCents: 48000 }],
@@ -227,7 +227,10 @@ function cents(raw) {
  */
 export function extractFields(text) {
   const facts = {};
-  const lines = String(text).split(/\r?\n/);
+  // Strip leftover PDF literal-string escapes so `Total \(USD\)` and plain
+  // `Total (USD)` parse identically.
+  const normalized = String(text).replace(/\\([()\\])/g, '$1');
+  const lines = normalized.split(/\r?\n/);
 
   const grab = (res) => {
     for (const re of res) {
@@ -316,19 +319,83 @@ export async function pdfText(bytes, inflate) {
         continue;
       }
     }
-    for (const tm of chunk.matchAll(/\(([^()]*)\)\s*Tj/g)) out.push(unescapePdf(tm[1]));
-    for (const tm of chunk.matchAll(/\[([^\]]*)\]\s*TJ/g)) {
-      const joined = Array.from(tm[1].matchAll(/\(([^()]*)\)/g), (x) => unescapePdf(x[1])).join('');
-      if (joined) out.push(joined);
-    }
+    out.push(...textShowOps(chunk));
   }
   return out.join('\n');
 }
 
-function unescapePdf(s) {
-  return s.replace(/\\([nrtbf()\\])/g, (_, c) =>
-    ({ n: '\n', r: '\r', t: '\t', b: '\b', f: '\f', '(': '(', ')': ')', '\\': '\\' })[c] ?? c
-  );
+/**
+ * Read a PDF literal string starting at s[start]==='('.
+ * Handles \\escapes (named, octal, line continuation) and balanced nested
+ * parentheses — `Total \(USD\)` parses as one string, not three fragments.
+ * Returns { text, end } where end is the index just past the final ')'.
+ */
+function readLiteral(s, start) {
+  let depth = 1;
+  let i = start + 1;
+  let buf = '';
+  while (i < s.length && depth > 0) {
+    const c = s[i];
+    if (c === '\\') {
+      const n = s[i + 1];
+      if (n === '\r' || n === '\n') {
+        i += n === '\r' && s[i + 2] === '\n' ? 3 : 2; // line continuation
+        continue;
+      }
+      if (n >= '0' && n <= '7') {
+        const m = /^[0-7]{1,3}/.exec(s.slice(i + 1));
+        buf += String.fromCharCode(parseInt(m[0], 8) & 0xff);
+        i += 1 + m[0].length;
+        continue;
+      }
+      buf += ({ n: '\n', r: '\r', t: '\t', b: '\b', f: '\f', '(': '(', ')': ')', '\\': '\\' })[n] ?? n;
+      i += 2;
+      continue;
+    }
+    if (c === '(') depth++;
+    else if (c === ')') depth--;
+    if (depth > 0) buf += c;
+    i++;
+  }
+  return { text: buf, end: i };
+}
+
+/** Scan a content stream for (…)Tj, […]TJ and (…)' text-show operations. */
+function textShowOps(chunk) {
+  const out = [];
+  const segs = []; // literal strings seen since the last '[' or operator
+  let i = 0;
+  while (i < chunk.length) {
+    const c = chunk[i];
+    if (c === '(') {
+      const lit = readLiteral(chunk, i);
+      segs.push(lit.text);
+      i = lit.end;
+      continue;
+    }
+    if (c === '[') { segs.length = 0; i++; continue; }
+    const prev = i > 0 ? chunk[i - 1] : ' ';
+    const isOp = !/[A-Za-z0-9]/.test(prev);
+    if (isOp && c === 'T' && chunk[i + 1] === 'j') {
+      out.push(segs.pop() ?? '');
+      segs.length = 0;
+      i += 2;
+      continue;
+    }
+    if (isOp && c === 'T' && chunk[i + 1] === 'J') {
+      out.push(segs.join(''));
+      segs.length = 0;
+      i += 2;
+      continue;
+    }
+    if (isOp && c === "'" && segs.length) {
+      out.push(segs.pop());
+      i++;
+      continue;
+    }
+    i++;
+  }
+  return out;
 }
 
 function looksLikePdf(bytes) {

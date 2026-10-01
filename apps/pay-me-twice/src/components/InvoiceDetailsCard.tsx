@@ -2,20 +2,8 @@ import { CURRENCIES } from '../../engine/engine.mjs';
 import { SCENARIOS } from '../../engine/documents.mjs';
 import type { InvoiceFacts } from '../types';
 
-const MONTH_OPTIONS = [
-  '2024-09', '2024-10', '2024-11', '2024-12', '2025-01', '2025-02', '',
-];
-
-function monthLabel(p: string) {
-  if (!p) return 'Not stated';
-  const [y, m] = p.split('-').map(Number);
-  const names = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
-    'August', 'September', 'October', 'November', 'December'];
-  return `${names[m - 1]} ${y}`;
-}
-
 export default function InvoiceDetailsCard({
-  facts, amountText, scenario, busy, uploadNote, canReplay,
+  facts, amountText, scenario, busy, uploadNote, canValidate, canReplay,
   onFactsChange, onAmountChange, onScenario, onValidate, onPay, onReplay, onUploadClick,
 }: {
   facts: InvoiceFacts;
@@ -23,6 +11,7 @@ export default function InvoiceDetailsCard({
   scenario: string;
   busy: boolean;
   uploadNote: string;
+  canValidate: boolean;
   canReplay: boolean;
   onFactsChange: (patch: Partial<InvoiceFacts>) => void;
   onAmountChange: (text: string, cents: number | null) => void;
@@ -54,14 +43,24 @@ export default function InvoiceDetailsCard({
         </label>
         <label className="field">
           <span>Billing period</span>
-          <select
-            value={facts.period}
-            onChange={(e) => onFactsChange({ period: e.target.value })}
-          >
-            {MONTH_OPTIONS.map((p) => (
-              <option key={p || 'none'} value={p}>{monthLabel(p)}</option>
-            ))}
-          </select>
+          <span className="period-row">
+            <input
+              type="month"
+              value={facts.period}
+              disabled={facts.period === ''}
+              onChange={(e) => onFactsChange({ period: e.target.value })}
+            />
+            <label className="period-none">
+              <input
+                type="checkbox"
+                checked={facts.period === ''}
+                onChange={(e) =>
+                  onFactsChange({ period: e.target.checked ? '' : '2026-09' })
+                }
+              />
+              Not stated
+            </label>
+          </span>
         </label>
         <label className="field">
           <span>Amount</span>
@@ -111,29 +110,38 @@ export default function InvoiceDetailsCard({
       </div>
       <p className="scenario-hint">{SCENARIOS.find((s) => s.id === scenario)?.hint ?? 'Upload your own file below.'}</p>
 
-      <button className="btn btn-primary" onClick={onValidate} disabled={busy}>
+      <button className="btn btn-primary" onClick={onValidate} disabled={busy || !canValidate}>
         {scenario === 'burst' ? 'Send 10 requests at once' : 'Validate invoice'} →
       </button>
+      {!canValidate && (
+        <p className="field-error" role="alert">
+          Complete supplier, invoice number and amount first — missing facts are never backfilled from a previous document.
+        </p>
+      )}
 
       <div className="secondary-actions">
-        <button className="btn btn-ghost" onClick={onPay} disabled={busy}>
+        <button className="btn btn-ghost" onClick={onPay} disabled={busy || !canValidate}>
           Try to get paid
         </button>
-        <button className="btn btn-ghost" onClick={onReplay} disabled={busy || !canReplay}
+        <button className="btn btn-ghost" onClick={onReplay} disabled={busy || !canValidate || !canReplay}
           title={canReplay ? 'Re-send the last request ID — expect the identical result' : 'Make a payment request first'}>
           Replay last request
         </button>
       </div>
 
-      <div className="upload-row">
-        <button className="btn btn-outline" onClick={onUploadClick} disabled={busy}>
-          Upload invoice (PDF / text / image)
-        </button>
-        <p className="upload-note">
-          Text and PDF files are parsed locally. Image-only scans get no invented fields.
-          {uploadNote && <><br /><strong>{uploadNote}</strong></>}
-        </p>
-      </div>
+      <details className="upload-details">
+        <summary>Upload or enter manually</summary>
+        <div className="upload-row">
+          <button className="btn btn-outline" onClick={onUploadClick} disabled={busy}>
+            Upload invoice (PDF / text / image)
+          </button>
+          <p className="upload-note">
+            Text and PDF files are parsed locally. Image-only scans get no invented fields —
+            anything the file doesn't state stays blank for you to confirm.
+            {uploadNote && <><br /><strong>{uploadNote}</strong></>}
+          </p>
+        </div>
+      </details>
     </section>
   );
 }

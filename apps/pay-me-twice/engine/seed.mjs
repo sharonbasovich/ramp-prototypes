@@ -30,7 +30,7 @@ export async function buildSeed() {
     docHash,
     filename: 'northline_inv1042.pdf',
     actor: 'Seed · accounts payable',
-    paidAt: fixtureTimestamp(0), // Sep 3, 2024 10:14 AM
+    paidAt: fixtureTimestamp(0), // Sep 3, 2026 10:14 AM
   };
 
   const attempts = [

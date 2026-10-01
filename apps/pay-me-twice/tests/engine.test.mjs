@@ -26,12 +26,12 @@ function memStore(payments = []) {
       return payments.filter((p) => p.supplierNorm === s && p.currency === c);
     },
     async nextPaymentUid() { seq += 1; return `PAY-${String(seq).padStart(4, '0')}`; },
-    async nextTimestamp() { return 'Sep 3, 2024 10:20 AM'; },
+    async nextTimestamp() { return 'Sep 3, 2026 10:20 AM'; },
     async insertPayment(rec) {
       const clash = payments.find((p) =>
         p.supplierNorm === rec.supplierNorm && p.invoiceNorm === rec.invoiceNorm && p.currency === rec.currency);
       if (clash) return false;
-      payments.push({ ...rec, paidAt: 'Sep 3, 2024 10:20 AM' });
+      payments.push({ ...rec, paidAt: 'Sep 3, 2026 10:20 AM' });
       return true;
     },
     async addAttempt(a) { attempts.push(a); },
@@ -48,10 +48,10 @@ const paid = {
   invoiceNorm: 'TST-100',
   currency: 'USD',
   amountCents: 123400,
-  period: '2024-08',
+  period: '2026-08',
   itemsSignature: 'audit services|1|123400',
   docHash: 'abc123hash',
-  paidAt: 'Sep 1, 2024 9:00 AM',
+  paidAt: 'Sep 1, 2026 9:00 AM',
 };
 
 const base = {
@@ -59,7 +59,7 @@ const base = {
   invoiceNumber: 'TST-100',
   currency: 'USD',
   amountCents: 123400,
-  period: '2024-08',
+  period: '2026-08',
   items: [{ description: 'Audit services', qty: 1, rateCents: 123400, amountCents: 123400 }],
   factsSource: 'generated',
   docSupported: true,
@@ -73,8 +73,8 @@ describe('normalization', () => {
     expect(normalizeInvoiceNumber('INV-1042')).not.toBe(normalizeInvoiceNumber('INV1042'));
   });
   it('maps month labels to periods and back', () => {
-    expect(monthToPeriod('September 2024')).toBe('2024-09');
-    expect(displayPeriod('2024-10')).toBe('October 2024');
+    expect(monthToPeriod('September 2026')).toBe('2026-09');
+    expect(displayPeriod('2026-10')).toBe('October 2026');
   });
   it('formats integer cents', () => {
     expect(formatCents(48000, 'USD')).toBe('$480.00');
@@ -108,7 +108,7 @@ describe('verdicts', () => {
     expect(v.status).toBe('review');
   });
   it('new reference + next period → clear (legitimate recurrence)', async () => {
-    const v = await evaluateInvoice({ ...base, invoiceNumber: 'TST-101', period: '2024-09' }, memStore([paid]));
+    const v = await evaluateInvoice({ ...base, invoiceNumber: 'TST-101', period: '2026-09' }, memStore([paid]));
     expect(v.status).toBe('clear');
     expect(v.payable).toBe(true);
   });
@@ -129,7 +129,7 @@ describe('verdicts', () => {
 describe('payInvoice', () => {
   it('records a clear payment once; replay returns identical result', async () => {
     const store = memStore([paid]);
-    const f = { ...base, invoiceNumber: 'TST-200', period: '2024-09' };
+    const f = { ...base, invoiceNumber: 'TST-200', period: '2026-09' };
     const r1 = await payInvoice(store, { requestId: 'r1', actor: 't', facts: f });
     expect(r1.outcome).toBe('recorded');
     const r2 = await payInvoice(store, { requestId: 'r1', actor: 't', facts: f });
@@ -139,7 +139,7 @@ describe('payInvoice', () => {
   });
   it('a second distinct request for the same identity is a duplicate', async () => {
     const store = memStore([paid]);
-    const f = { ...base, invoiceNumber: 'TST-200', period: '2024-09' };
+    const f = { ...base, invoiceNumber: 'TST-200', period: '2026-09' };
     await payInvoice(store, { requestId: 'a', actor: 't', facts: f });
     const r = await payInvoice(store, { requestId: 'b', actor: 't', facts: f });
     expect(r.outcome).toBe('duplicate');
@@ -163,12 +163,12 @@ describe('extraction', () => {
       'INVOICE',
       'Supplier: Acme Industrial',
       'Invoice No.: ACM-77',
-      'Billing Period: June 2024',
+      'Billing Period: June 2026',
       'Total (USD) $1,250.00',
     ].join('\n'));
     expect(fields.supplier).toBe('Acme Industrial');
     expect(fields.invoiceNumber).toBe('ACM-77');
-    expect(fields.period).toBe('2024-06');
+    expect(fields.period).toBe('2026-06');
     expect(fields.amountCents).toBe(125000);
     expect(fields.currency).toBe('USD');
   });
@@ -176,12 +176,12 @@ describe('extraction', () => {
     const { fields } = extractFields([
       'From: Beacon Works',
       'Invoice #BW-12',
-      'For services rendered: March 2024',
+      'For services rendered: March 2026',
       'Amount due (USD): $77.50',
     ].join('\n'));
     expect(fields.supplier).toBe('Beacon Works');
     expect(fields.invoiceNumber).toBe('BW-12');
-    expect(fields.period).toBe('2024-03');
+    expect(fields.period).toBe('2026-03');
     expect(fields.amountCents).toBe(7750);
   });
   it('image-like bytes are unsupported, never invented', async () => {
@@ -189,5 +189,60 @@ describe('extraction', () => {
     const r = await extractDocument(bytes, 'scan.png');
     expect(r.supported).toBe(false);
     expect(r.fields.supplier).toBeUndefined();
+  });
+
+  it('native PDF: escaped parens parse, exact $17.25, missing fields stay missing', async () => {
+    const content =
+      'BT /F1 12 Tf 50 720 Td (Supplier: Cobalt Fixtures) Tj ' +
+      '0 -20 Td (Invoice No.: CF-9) Tj ' +
+      '0 -20 Td (Total \\(USD\\) $17.25) Tj ET';
+    const pdf =
+      `%PDF-1.4\n4 0 obj<</Length ${content.length}>>stream\n${content}\n` +
+      'endstream\nendobj\ntrailer<</Root 1 0 R>>';
+    const r = await extractDocument(new TextEncoder().encode(pdf), 'cf9.pdf');
+    expect(r.supported).toBe(true);
+    expect(r.fields.supplier).toBe('Cobalt Fixtures');
+    expect(r.fields.invoiceNumber).toBe('CF-9');
+    expect(r.fields.amountCents).toBe(1725);
+    expect(r.fields.period).toBeUndefined();
+    expect(r.found).not.toContain('period');
+  });
+
+  it('native PDF: TJ array with escapes and kerning joins correctly', async () => {
+    const content =
+      'BT /F1 12 Tf 50 720 Td [(Total \\(USD\\)) -40 ($17.25)] TJ ET';
+    const pdf =
+      `%PDF-1.4\n4 0 obj<</Length ${content.length}>>stream\n${content}\n` +
+      'endstream\nendobj\ntrailer<</Root 1 0 R>>';
+    const r = await extractDocument(new TextEncoder().encode(pdf), 'tj.pdf');
+    expect(r.supported).toBe(true);
+    expect(r.fields.amountCents).toBe(1725);
+  });
+
+  it('escaped label text parses like plain text', () => {
+    const { fields } = extractFields('Supplier: Escaped Co\nTotal \\(USD\\) $17.25');
+    expect(fields.amountCents).toBe(1725);
+    expect(fields.currency).toBe('USD');
+  });
+
+  it('incomplete text leaves unstated fields absent — never guessed', () => {
+    const { fields, found } = extractFields('Supplier: Partial Co\nTotal (USD) $9.99');
+    expect(fields.supplier).toBe('Partial Co');
+    expect(fields.amountCents).toBe(999);
+    expect(fields.invoiceNumber).toBeUndefined();
+    expect(fields.period).toBeUndefined();
+    expect(found).toContain('supplier');
+    expect(found).not.toContain('invoiceNumber');
+    expect(found).not.toContain('period');
+  });
+
+  it('manually-entered incomplete facts cannot pay', async () => {
+    const store = memStore([paid]);
+    const r = await payInvoice(store, {
+      requestId: 'm1', actor: 'manual',
+      facts: { supplier: 'Partial Co', invoiceNumber: '', amountCents: null, factsSource: 'manual', docSupported: false },
+    });
+    expect(r.outcome).toBe('invalid');
+    expect(store.payments.length).toBe(1);
   });
 });

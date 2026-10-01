@@ -66,9 +66,17 @@ Sample documents are deterministic text renderings generated in
 `engine/documents.mjs` and honestly labeled. Uploads accept text/PDF/image
 files: text files and PDFs are parsed by a real extractor
 (`engine/documents.mjs`, `pdfText` handles FlateDecode via zlib on the server
-or `DecompressionStream` in the browser). Image-only/malformed files produce
+or `DecompressionStream` in the browser, and parses escaped literal strings
+such as `(Total \(USD\) $17.25)`). Image-only/malformed files produce
 an **Unsupported document** state — fields are never guessed; editable manual
 facts are offered instead.
+
+A new document never retains facts from a previous or sample invoice:
+extraction fills only what the text states, everything else stays blank, and
+pay is blocked until supplier, invoice number and amount are verified. In the
+"Invoice (as received)" panel, uploads show their own extracted text as
+source evidence rather than a fabricated paper, and the billing-period
+control accepts any real month or "Not stated".
 
 ## Integrity notes
 
@@ -77,7 +85,7 @@ facts are offered instead.
   currency.
 - "Duplicate sandbox payment blocked" counts prevented repeats — **not**
   measured savings, and never claimed as such.
-- Dates come from an explicit fixture clock (Sep 3, 2024, +1 min per attempt),
+- Dates come from an explicit fixture clock (Sep 3, 2026, +1 min per attempt),
   not the wall clock.
 - Reset restores the seeded sandbox (one paid invoice) deterministically.
 - Scripted scenarios are scripted; no AI/model is used or claimed.

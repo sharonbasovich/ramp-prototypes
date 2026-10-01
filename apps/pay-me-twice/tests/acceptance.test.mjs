@@ -65,7 +65,7 @@ describe('Pay Me Twice acceptance matrix (HTTP + node:sqlite)', () => {
   });
 
   it('renamed original: identical bytes under a new filename → duplicate, one payment', async () => {
-    const text = doc({ supplier: SUP, number: 'ATT-1', period: 'August 2024', total: '1,234.00' });
+    const text = doc({ supplier: SUP, number: 'ATT-1', period: 'August 2026', total: '1,234.00' });
     const ing = await uploadAndFacts('att1.pdf', text);
     expect(ing.supported).toBe(true);
     const f = { ...ing.fields, docHash: ing.docHash, docSupported: true };
@@ -87,7 +87,7 @@ describe('Pay Me Twice acceptance matrix (HTTP + node:sqlite)', () => {
       '*** STATEMENT OF SERVICES ***',
       `From: ${SUP}`,
       `Invoice #ATT-1`,
-      `For services rendered: August 2024`,
+      `For services rendered: August 2026`,
       `Amount due (USD): $1,234.00`,
     ].join('\n');
     const ing = await uploadAndFacts('layout-b.pdf', text);
@@ -108,7 +108,7 @@ describe('Pay Me Twice acceptance matrix (HTTP + node:sqlite)', () => {
   });
 
   it('legitimate recurrence: new reference + next month → payable', async () => {
-    const text = doc({ supplier: SUP, number: 'ATT-2', period: 'September 2024', total: '1,234.00' });
+    const text = doc({ supplier: SUP, number: 'ATT-2', period: 'September 2026', total: '1,234.00' });
     const ing = await uploadAndFacts('att2.pdf', text);
     const f = { ...ing.fields, docHash: ing.docHash, docSupported: true };
     const p = await post('/api/pay', { requestId: rid('pay'), actor: 'ap-clerk', facts: f });
@@ -130,7 +130,7 @@ describe('Pay Me Twice acceptance matrix (HTTP + node:sqlite)', () => {
   });
 
   it('true request race: 20 concurrent requests → exactly one payment', async () => {
-    const text = doc({ supplier: 'Race Condition LLC', number: 'RACE-7', period: 'May 2024', total: '99.00' });
+    const text = doc({ supplier: 'Race Condition LLC', number: 'RACE-7', period: 'May 2026', total: '99.00' });
     const ing = await uploadAndFacts('race7.pdf', text);
     const f = { ...ing.fields, docHash: ing.docHash, docSupported: true };
     const results = await Promise.all(
@@ -145,7 +145,7 @@ describe('Pay Me Twice acceptance matrix (HTTP + node:sqlite)', () => {
   });
 
   it('retry: replaying a successful request ID returns the same payment', async () => {
-    const text = doc({ supplier: 'Retry & Sons', number: 'RT-3', period: 'April 2024', total: '10.00' });
+    const text = doc({ supplier: 'Retry & Sons', number: 'RT-3', period: 'April 2026', total: '10.00' });
     const ing = await uploadAndFacts('rt3.pdf', text);
     const f = { ...ing.fields, docHash: ing.docHash, docSupported: true };
     const id = rid('retry');
@@ -160,7 +160,7 @@ describe('Pay Me Twice acceptance matrix (HTTP + node:sqlite)', () => {
   });
 
   it('currency isolation: EUR never aggregates or collides with USD', async () => {
-    const eurText = doc({ supplier: 'Euro Parts BV', number: 'EU-1', period: 'July 2024', total: '500.00', currency: 'EUR' });
+    const eurText = doc({ supplier: 'Euro Parts BV', number: 'EU-1', period: 'July 2026', total: '500.00', currency: 'EUR' });
     const ing = await uploadAndFacts('eu1.pdf', eurText);
     const f = { ...ing.fields, docHash: ing.docHash, docSupported: true };
     const p = await post('/api/pay', { requestId: rid('pay'), actor: 't', facts: f });
@@ -169,7 +169,7 @@ describe('Pay Me Twice acceptance matrix (HTTP + node:sqlite)', () => {
     expect(s.stats.paidByCurrency.EUR).toBe(50000);
     expect(s.stats.paidByCurrency.USD).toBeGreaterThan(0);
     // Identical reference in EUR does not collide with a USD payment.
-    const text2 = doc({ supplier: 'Euro Parts BV', number: 'EU-1', period: 'July 2024', total: '500.00', currency: 'USD' });
+    const text2 = doc({ supplier: 'Euro Parts BV', number: 'EU-1', period: 'July 2026', total: '500.00', currency: 'USD' });
     const ing2 = await uploadAndFacts('eu1-usd.pdf', text2);
     const p2 = await post('/api/pay', {
       requestId: rid('pay'), actor: 't',
@@ -180,7 +180,7 @@ describe('Pay Me Twice acceptance matrix (HTTP + node:sqlite)', () => {
 
   it('rejected-request conservation: blocked/held attempts move nothing', async () => {
     const before = await get('/api/state');
-    const text = doc({ supplier: SUP, number: 'ATT-1', period: 'August 2024', total: '1,234.00' });
+    const text = doc({ supplier: SUP, number: 'ATT-1', period: 'August 2026', total: '1,234.00' });
     const ing = await uploadAndFacts('att1-again.pdf', text);
     const f = { ...ing.fields, docHash: ing.docHash, docSupported: true };
     await post('/api/pay', { requestId: rid('x'), actor: 't', facts: f });
@@ -189,6 +189,44 @@ describe('Pay Me Twice acceptance matrix (HTTP + node:sqlite)', () => {
     const after = await get('/api/state');
     expect(after.payments.length).toBe(before.payments.length);
     expect(after.stats.paidByCurrency.USD).toBe(before.stats.paidByCurrency.USD);
+  });
+
+  it('native PDF: escaped-paren strings, exact $17.25, unstated fields stay missing', async () => {
+    const content =
+      'BT /F1 12 Tf 50 720 Td (Supplier: Cobalt Fixtures) Tj ' +
+      '0 -20 Td (Invoice No.: CF-9) Tj ' +
+      '0 -20 Td (Total \\(USD\\) $17.25) Tj ET';
+    const pdf = Buffer.from(
+      `%PDF-1.4\n4 0 obj<</Length ${content.length}>>stream\n${content}\n` +
+      'endstream\nendobj\ntrailer<</Root 1 0 R>>', 'latin1');
+    const ing = await post('/api/documents', { filename: 'cf9.pdf', contentBase64: pdf.toString('base64') });
+    expect(ing.supported).toBe(true);
+    expect(ing.fields.amountCents).toBe(1725);
+    expect(ing.fields.supplier).toBe('Cobalt Fixtures');
+    expect(ing.fields.invoiceNumber).toBe('CF-9');
+    expect(ing.fields.period).toBe(''); // incomplete: never backfilled
+    expect(ing.found).not.toContain('period');
+    const p = await post('/api/pay', {
+      requestId: rid('pay'), actor: 'ap-clerk',
+      facts: { ...ing.fields, docHash: ing.docHash, docSupported: true },
+    });
+    expect(p.outcome).toBe('recorded');
+    const s = await get('/api/state');
+    const pay = s.payments.find((x) => x.invoiceNumber === 'CF-9');
+    expect(pay.amountCents).toBe(1725);
+    expect(pay.period).toBe('');
+  });
+
+  it('manual incomplete facts cannot pay — invalid, ledger conserved', async () => {
+    const before = await get('/api/state');
+    const p = await post('/api/pay', {
+      requestId: rid('pay'), actor: 'manual-entry',
+      facts: { supplier: 'Manual Entry Co', invoiceNumber: '', amountCents: null, period: '', factsSource: 'manual', docSupported: false },
+    });
+    expect(p.outcome).toBe('invalid');
+    expect(p.paymentUid).toBeNull();
+    const after = await get('/api/state');
+    expect(after.payments.length).toBe(before.payments.length);
   });
 
   it('reset returns to the seeded state', async () => {
