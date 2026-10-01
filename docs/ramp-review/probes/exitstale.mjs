@@ -1,0 +1,10 @@
+const E='http://localhost:5315/api';
+const post=(p,b)=>fetch(E+p,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b??{})}).then(async r=>[r.status,await r.json().catch(()=>null)]);
+const get=(p)=>fetch(E+p).then(r=>r.json()).then(j=>j.result??j);
+const view=(s)=>s.bookings.map(b=>{const a=b.assessment??{};return `${b.bookingId}:${a.status}/${a.tierId}/fee${a.feeMinor}/ref${a.refundMinor}/net${a.netBenefitMinor}`}).join(' ');
+const reqv=(s)=>JSON.stringify(s.requests.map(r=>[r.bookingId,r.status,r.stale??r.isStale]));
+await post('/reset',{}); await post('/event/cancel'); await post('/packet/prepare'); await post('/packet/approve');
+let s=await get('/state'); console.log('T0',s.clock?.instant??JSON.stringify(s.clock),'\n ',view(s),'\n ',reqv(s));
+await post('/clock',{instant:'2025-04-27T14:00:00Z'});
+s=await get('/state'); console.log('T+2d\n ',view(s),'\n ',reqv(s));
+const [es,ex]=await post('/packet/execute'); console.log('execute',es,JSON.stringify(ex));

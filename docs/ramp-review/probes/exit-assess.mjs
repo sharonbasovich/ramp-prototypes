@@ -1,0 +1,22 @@
+import { assess } from './shared/engine.mjs';
+const B=(c,p,u,cur='USD')=>({bookingId:'b',committedMinor:c,paidMinor:p,unpaidMinor:u,currency:cur});
+const T=(f,b='always',cut)=>({tierId:'t',boundary:b,cutoffInstant:cut,fee:{kind:'fixed',amountMinor:f}});
+const P=(tiers)=>({policyId:'p',version:'v1',supported:true,tiers});
+const now=Date.parse('2025-03-09T07:00:00Z');
+const show=(l,a)=>console.log(l,a.status,a.refundMinor,a.futureChargesAvoidedMinor,a.extraPaymentMinor,a.netBenefitMinor,a.reason??'');
+show('E01',assess(B(30000,10000,20000),P([T(15000)]),now));
+show('E02',assess(B(20000,20000,0),P([T(5000)]),now));
+show('E09',assess(B(10000,2000,8000),P([T(13000)]),now));
+// DST: spring-forward Toronto 2025-03-09 02:00 local = 07:00Z. cutoff 2025-03-09T07:00:00Z
+const cut='2025-03-09T07:00:00Z';
+const pol=P([T(0,'before',cut),{...T(5000,'at_or_after',cut),tierId:'late'}]);
+show('DST -1ms',assess(B(20000,20000,0),pol,Date.parse(cut)-1));
+show('DST exact',assess(B(20000,20000,0),pol,Date.parse(cut)));
+show('gap overlap',assess(B(20000,20000,0),P([T(0,'before',cut),T(5000,'always')]),now-1));
+show('no tier',assess(B(20000,20000,0),P([T(0,'before',cut)]),Date.parse(cut)));
+show('pct 33%',assess(B(10001,10001,0),P([{tierId:'t',boundary:'always',fee:{kind:'percent',percent:33}}]),now));
+show('float',assess(B(100.5,100.5,0),P([T(0)]),now));
+show('CAD',assess(B(100,100,0,'CAD'),P([T(0)]),now));
+show('C!=P+U',assess(B(100,50,0),P([T(0)]),now));
+show('bad cutoff',assess(B(100,100,0),P([T(0,'before','not-a-date')]),now));
+show('unsupported',assess(B(100,100,0),{...P([T(0)]),supported:false},now));
