@@ -1,0 +1,13 @@
+:root {
+  --warm-white: #fdfefd;
+  --forest-ink: #082e22;
+  --secondary: #566360;
+  --line: #d6dfda;
+  --lime-wash: #f3fce2;
+  --primary: #194d35;
+}
+body {
+  margin: 0;
+  background: var(--warm-white);
+  color: var(--forest-ink);
+}
