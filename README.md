@@ -12,8 +12,9 @@ npm run setup && npm start
 ```
 
 `npm run setup` installs dependencies for every app currently present under
-`apps/`; `npm start` launches each app's sandbox server (React/Vite build +
-same-origin `/api` backed by `node:sqlite`) on its own port:
+`apps/`; `npm start` builds any missing `dist/` and launches each app's
+sandbox server (React/Vite plus same-origin `/api` backed by `node:sqlite`)
+on its own port. To rebuild changed source, run `npm run build` first:
 
 | App | Directory | Port |
 | --- | --- | --- |
@@ -24,10 +25,14 @@ same-origin `/api` backed by `node:sqlite`) on its own port:
 | ExitLane | `apps/exitlane` | http://localhost:5315 |
 
 Requires Node 22.x. Only directories that exist are touched, so this works
-while apps land in parallel — run a single app with `APP=<slug> npm start`.
+while apps land in parallel. Run one app on macOS/Linux with
+`APP=<slug> npm start`; in PowerShell use `$env:APP='<slug>'; npm start`
+(then `Remove-Item Env:APP` when finished).
 
-Open `npm run hub` (http://localhost:5300) for the quiet demo hub linking all
-five, or `hub/index.html` directly.
+Run `npm run hub` in a second terminal and open http://localhost:5300 for the
+demo hub linking all five local servers. Directly opening `hub/index.html`
+as a file does not launch or route to the apps. On GitHub Pages, the same
+hub uses relative links to the deployed app directories.
 
 ## Every app
 
@@ -45,6 +50,7 @@ Every build also works fully client-side from GitHub Pages — the app probes
 
 - `npm run setup` — `npm ci` in each present `apps/*/` directory.
 - `npm test` — run each app's test suite sequentially.
+- `npm run typecheck` — run each available app's typecheck script.
 - `npm run build` — run each app's production build.
 - `npm start` — start every present app's sandbox server.
 - `npm run hub` — serve the demo hub on :5300.

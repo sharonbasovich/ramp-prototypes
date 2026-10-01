@@ -115,8 +115,12 @@ function runStart() {
   }
   // Servers serve dist/, so build any app that has not been built yet —
   // `npm run setup && npm start` must work on a fresh clone.
+  const ready = [];
   for (const slug of list) {
-    if (existsSync(join(APPS_DIR, slug, 'dist', 'index.html'))) continue;
+    if (existsSync(join(APPS_DIR, slug, 'dist', 'index.html'))) {
+      ready.push(slug);
+      continue;
+    }
     console.log(`=== ${slug}: building dist (npm run build) ===`);
     const launch = npmLaunch(['run', 'build']);
     const r = spawnSync(launch.command, launch.args, {
@@ -127,13 +131,14 @@ function runStart() {
     });
     if (r.error || r.status !== 0) {
       console.error(`${slug}: build failed${r.error ? ` (${r.error.message})` : ''} — skipping`);
-      list.splice(list.indexOf(slug), 1);
+    } else {
+      ready.push(slug);
     }
   }
-  if (list.length === 0) process.exit(1);
+  if (ready.length === 0) process.exit(1);
   console.log('starting sandbox servers (Ctrl+C stops all):');
   const kids = [];
-  for (const slug of list) {
+  for (const slug of ready) {
     const port = PORTS[slug] ?? '????';
     console.log(`  ${slug.padEnd(14)} http://localhost:${port}`);
     // When the app's start script is a plain `node <file>` invocation, spawn
