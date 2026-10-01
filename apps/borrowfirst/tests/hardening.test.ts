@@ -295,6 +295,41 @@ describe('baseline and drift revalidation at reserve (audit)', () => {
   });
 });
 
+describe('baseline replay honors reviewed quote exclusions (audit regression)', () => {
+  it('a plan reviewed with po-refurb excluded reserves against the same $675 baseline', () => {
+    const store = freshStore();
+    store.ownerConfirm('M-204', DEMO_NOW);
+    // Next-week deadline: refurb quote also delivers in time, so excluding
+    // it changes the baseline ($675 all-new vs $590 refurb-cheapest).
+    const request = requestWith({ requiredBy: '2026-10-09T21:00:00.000Z' });
+    const plan = allocate(request, worldOf(store), DEMO_NOW, {
+      excludeQuoteIds: ['po-refurb'],
+    });
+    expect(plan.baseline?.costCents).toBe(67500);
+    expect(plan.excludedQuoteIds).toEqual(['po-refurb']);
+    expect(plan.totalCostCents).toBe(4500);
+    const result = store.reserve(request, plan, LOCATIONS, DEMO_NOW, DEMO_NOW);
+    expect(result.ok).toBe(true);
+  });
+
+  it('a forged exclusion list no longer matches the recomputed baseline', () => {
+    const store = freshStore();
+    store.ownerConfirm('M-204', DEMO_NOW);
+    const request = requestWith({ requiredBy: '2026-10-09T21:00:00.000Z' });
+    // Reviewed WITHOUT exclusion → $590 baseline (refurb mix).
+    const plan = allocate(request, worldOf(store), DEMO_NOW);
+    expect(plan.baseline?.costCents).toBe(59000);
+    // Forging exclusions would fake a $675 baseline — the recompute must
+    // replay them and reject against the reviewed figure.
+    const forged = { ...plan, excludedQuoteIds: ['po-refurb'] };
+    const result = store.reserve(request, forged, LOCATIONS, DEMO_NOW, DEMO_NOW);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failures.some((f) => f.code === 'BASELINE_STALE')).toBe(true);
+    }
+  });
+});
+
 describe('durable store lifecycle (audit)', () => {
   it('reservations and confirmations survive a restart; ensureSeeded does not wipe', () => {
     const path = tempDb();

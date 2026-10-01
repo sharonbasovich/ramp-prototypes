@@ -386,6 +386,7 @@ export function allocate(
     evaluations,
     assetVersions,
     quoteVersions,
+    excludedQuoteIds: [...quoteExcluded],
     warnings,
     errors,
   };
@@ -518,10 +519,14 @@ export function validatePlanIntegrity(
   }
 
   // Baseline revalidation: the all-new comparison must still be backed by
-  // currently valid quotes at the prices shown at review time.
+  // currently valid quotes at the prices shown at review time — replaying
+  // the same quote exclusions the reviewed plan was computed under.
   if (plan.baseline !== null && plan.baseline !== undefined) {
     const quoteEvals = evaluateQuotes(req, world, now);
-    const validQuotes = quoteEvals.filter((q) => q.valid).map((q) => q.option);
+    const planExcluded = new Set(plan.excludedQuoteIds ?? []);
+    const validQuotes = quoteEvals
+      .filter((q) => q.valid && !planExcluded.has(q.option.id))
+      .map((q) => q.option);
     const currentLines = cheapestPurchase(req.quantity, validQuotes);
     const currentCost = currentLines === null ? null : lineCost(currentLines);
     if (currentCost === null) {

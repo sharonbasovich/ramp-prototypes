@@ -18,43 +18,66 @@ const KEY = 'borrowfirst.sandbox.v1';
 const LOCK = 'borrowfirst-sandbox-write';
 
 interface Persisted {
+  version: number;
   world: World;
 }
 
+// Bumped whenever the world shape changes — stale payloads are reseeded
+// rather than half-understood.
+const PERSIST_VERSION = 2;
+
+function isUsablePersisted(parsed: unknown): parsed is Persisted {
+  const p = parsed as Persisted;
+  return (
+    !!p &&
+    p.version === PERSIST_VERSION &&
+    !!p.world &&
+    Array.isArray(p.world.assets) &&
+    Array.isArray(p.world.transferOptions) &&
+    // Routes without a destination were written by a pre-route schema and
+    // would silently match nothing — treat the payload as unusable.
+    p.world.transferOptions.every((t) => typeof t.destinationLocationId === 'string')
+  );
+}
+
 export class SandboxStore {
-  // In-memory fallback for when localStorage is blocked or throws —
-  // state then lives only for this instance's lifetime, never reseeding
-  // silently between calls.
+  // In-memory world used ONLY when localStorage is genuinely broken
+  // (throws on read/write). With working storage every load() re-reads so
+  // separate tabs/instances stay consistent through the shared store —
+  // instance memory never masks another writer's state.
   private memoryWorld: World | null = null;
+  private storageBroken = false;
 
   load(): World {
-    // Always hand out a copy — callers mutate the world then pass it to
-    // persist(); returning memoryWorld itself would corrupt the cache.
-    if (this.memoryWorld) return structuredClone(this.memoryWorld);
-    try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as Persisted;
-        if (parsed.world && Array.isArray(parsed.world.assets)) {
-          this.memoryWorld = parsed.world;
-          return structuredClone(this.memoryWorld);
+    if (!this.storageBroken) {
+      try {
+        const raw = localStorage.getItem(KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (isUsablePersisted(parsed)) return structuredClone(parsed.world);
+          // Missing/legacy/corrupt payload — reseed honestly below.
         }
+      } catch {
+        this.storageBroken = true;
       }
-    } catch {
-      // storage unavailable — fall back to instance memory below
     }
+    if (this.memoryWorld) return structuredClone(this.memoryWorld);
     const world = seedWorld();
     this.persist(world);
     return world;
   }
 
   private persist(world: World): void {
-    this.memoryWorld = structuredClone(world);
-    try {
-      localStorage.setItem(KEY, JSON.stringify({ world }));
-    } catch {
-      // storage full/blocked — instance memory still holds the state
+    if (!this.storageBroken) {
+      try {
+        localStorage.setItem(KEY, JSON.stringify({ version: PERSIST_VERSION, world }));
+        this.memoryWorld = null;
+        return;
+      } catch {
+        this.storageBroken = true;
+      }
     }
+    this.memoryWorld = structuredClone(world);
   }
 
   reset(): World {

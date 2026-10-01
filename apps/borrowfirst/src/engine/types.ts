@@ -146,6 +146,9 @@ export interface AllocationPlan {
   evaluations: AssetEvaluation[];
   assetVersions: Record<string, number>;
   quoteVersions: Record<string, number>;
+  // Quote ids excluded at review time — part of the reviewed baseline
+  // contract; reserve revalidation replays the same exclusions.
+  excludedQuoteIds: string[];
   warnings: string[];
   errors: string[];
 }
