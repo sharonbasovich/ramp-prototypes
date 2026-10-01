@@ -18,6 +18,9 @@ function freshStore(config) {
   return store;
 }
 
+// Request ids are epoch-scoped; fresh stores are always epoch 1.
+const rid = (bookingId, epoch = 1) => `req-${bookingId}-e${epoch}`;
+
 function booking(store, id) {
   return store.getBooking(id);
 }
@@ -144,7 +147,7 @@ test('E06: scripted provider failure leaves booking pending; confirmed totals un
   engine.preparePacket(store);
   engine.approvePacket(store);
   const before = snap(store).totals;
-  const r = engine.executeRequest(store, 'req-bk-equipment');
+  const r = engine.executeRequest(store, rid('bk-equipment'));
   assert.equal(r.ok, true);
   assert.equal(r.result.outcome.outcome, 'failed');
   assert.equal(request(store, 'bk-equipment').status, 'failed');
@@ -160,16 +163,16 @@ test('E07: re-executing a confirmed request replays; retrying a failure appends 
   engine.cancelEvent(store);
   engine.preparePacket(store);
   engine.approvePacket(store);
-  engine.executeRequest(store, 'req-bk-room');
-  const again = engine.executeRequest(store, 'req-bk-room');
+  engine.executeRequest(store, rid('bk-room'));
+  const again = engine.executeRequest(store, rid('bk-room'));
   assert.equal(again.result.replayed, true);
-  assert.equal(store.listOutcomesForRequest('req-bk-room').length, 1, 'same idempotency key never double-executes');
+  assert.equal(store.listOutcomesForRequest(rid('bk-room')).length, 1, 'same idempotency key never double-executes');
   // fail then retry
-  engine.executeRequest(store, 'req-bk-equipment');
+  engine.executeRequest(store, rid('bk-equipment'));
   assert.equal(request(store, 'bk-equipment').status, 'failed');
-  const retry = engine.executeRequest(store, 'req-bk-equipment');
+  const retry = engine.executeRequest(store, rid('bk-equipment'));
   assert.equal(retry.result.outcome.outcome, 'confirmed');
-  const outs = store.listOutcomesForRequest('req-bk-equipment');
+  const outs = store.listOutcomesForRequest(rid('bk-equipment'));
   assert.equal(outs.length, 2);
   assert.equal(outs[0].outcome, 'failed');
   assert.equal(outs[1].outcome, 'confirmed');
@@ -277,10 +280,10 @@ test('E12: editing amounts after approval makes the request stale; execution ref
   assert.equal(edit.ok, true);
   assert.equal(request(store, 'bk-room').status, 'stale');
   assert.equal(store.getBooking('bk-room').version, 2);
-  const ex = engine.executeRequest(store, 'req-bk-room');
+  const ex = engine.executeRequest(store, rid('bk-room'));
   assert.equal(ex.ok, false);
   assert.equal(ex.code, 'stale');
-  assert.equal(store.listOutcomesForRequest('req-bk-room').length, 0);
+  assert.equal(store.listOutcomesForRequest(rid('bk-room')).length, 0);
 });
 
 /* ---- E13: export distinguishes every state ---- */
@@ -289,8 +292,8 @@ test('E13: export distinguishes confirmed / failed / excluded / not-approved, wi
   engine.cancelEvent(store);
   engine.preparePacket(store);
   engine.approvePacket(store);
-  engine.executeRequest(store, 'req-bk-room'); // confirmed
-  engine.executeRequest(store, 'req-bk-equipment'); // fails (scripted)
+  engine.executeRequest(store, rid('bk-room')); // confirmed
+  engine.executeRequest(store, rid('bk-equipment')); // fails (scripted)
   // bk-catering + bk-shuttle stay approved-but-unexecuted; bk-decor excluded.
   const packet = engine.exportPacket(store, 'SQLite backend sandbox');
   assert.equal(packet.mode, 'SQLite backend sandbox');
@@ -313,16 +316,116 @@ test('E14: after simulated confirmation, refund due is tracked but received stay
   engine.cancelEvent(store);
   engine.preparePacket(store);
   engine.approvePacket(store);
-  engine.executeRequest(store, 'req-bk-room');
+  engine.executeRequest(store, rid('bk-room'));
   let s = snap(store);
   assert.equal(s.totals.confirmedRefundsDueMinor, 40000);
   assert.equal(s.totals.receivedRefundsMinor, 0);
-  engine.markRefundReceived(store, 'req-bk-room');
+  engine.markRefundReceived(store, rid('bk-room'));
   s = snap(store);
   assert.equal(s.totals.receivedRefundsMinor, 40000);
-  const replay = engine.markRefundReceived(store, 'req-bk-room');
+  const replay = engine.markRefundReceived(store, rid('bk-room'));
   assert.equal(replay.result.replayed, true);
   assert.equal(snap(store).totals.receivedRefundsMinor, 40000, 'receipt counted exactly once');
+});
+
+/* ---- executePacket reports skipped requests with reasons ---- */
+test('packet execute response includes skipped entries: stale refused vs excluded manual_review', () => {
+  const store = freshStore();
+  engine.cancelEvent(store);
+  engine.preparePacket(store);
+  engine.approvePacket(store);
+  engine.setClock(store, '2025-04-25T16:30:00Z'); // room approval goes stale
+  const res = engine.executePacket(store);
+  assert.equal(res.ok, true);
+  const byBooking = Object.fromEntries(res.result.results.map((r) => [r.bookingId, r]));
+  assert.equal(byBooking['bk-room'].skipped, true);
+  assert.equal(byBooking['bk-room'].status, 'stale');
+  assert.match(byBooking['bk-room'].reason, /stale/);
+  assert.match(byBooking['bk-room'].reason, /clock_moved/);
+  assert.equal(byBooking['bk-decor'].skipped, true);
+  assert.match(byBooking['bk-decor'].reason, /excluded: manual_review/);
+  assert.equal(byBooking['bk-catering'].ok, true);
+  assert.equal(byBooking['bk-catering'].status, 'executed');
+  assert.equal(byBooking['bk-catering'].skipped, undefined);
+});
+
+/* ---- P1: failed requests re-verify the approval before any provider call ---- */
+test('failed retry revalidates the approval fingerprint; stale requires fresh review, history kept', () => {
+  const store = freshStore({
+    bookings: [{ bookingId: 'flaky', service: 'AV', providerId: 'tp-flaky', committedMinor: 20000, paidMinor: 20000, unpaidMinor: 0, policyId: 'tp-tiered' }],
+    policies: [
+      {
+        policyId: 'tp-tiered', version: 'v1', supported: true, summary: 'free before cutoff', sourceRef: 't',
+        tiers: [
+          { tierId: 'free', boundary: 'before', cutoffInstant: '2025-04-25T16:00:00Z', fee: { kind: 'fixed', amountMinor: 0 } },
+          { tierId: 'late', boundary: 'at_or_after', cutoffInstant: '2025-04-25T16:00:00Z', fee: { kind: 'percent', percent: 100 } },
+        ],
+      },
+    ],
+    providers: { 'tp-flaky': { displayName: 'Flaky', script: ['fail:503:boom', 'confirmed'] } },
+  });
+  engine.cancelEvent(store);
+  engine.preparePacket(store);
+  engine.approvePacket(store);
+  const first = engine.executeRequest(store, rid('flaky'));
+  assert.equal(first.result.outcome.outcome, 'failed');
+  engine.setClock(store, '2025-04-25T16:30:00Z'); // crosses the fee cutoff
+  const retry = engine.executeRequest(store, rid('flaky'));
+  assert.equal(retry.result.stale, true, 'retry must refuse the stale approval before any provider call');
+  assert.equal(request(store, 'flaky').status, 'stale');
+  assert.equal(store.listOutcomesForRequest(rid('flaky')).length, 1, 'attempt history preserved — no new provider call');
+  // Fresh review restores executability on the new figures.
+  engine.preparePacket(store);
+  engine.approvePacket(store);
+  const again = engine.executeRequest(store, rid('flaky'));
+  assert.equal(again.result.outcome.outcome, 'confirmed');
+  assert.equal(store.listOutcomesForRequest(rid('flaky')).length, 2);
+});
+
+/* ---- P1: an invalid assessment can never be approved or executed ---- */
+test('approvePacket refuses a booking whose assessment is invalid since prepare; no fake confirmation', () => {
+  const store = freshStore();
+  engine.cancelEvent(store);
+  engine.preparePacket(store);
+  // Corrupt the room booking's arithmetic AFTER the packet was prepared:
+  // committed 40000 != paid 35000 + unpaid 6000 -> 'invalid' assessment.
+  const edit = engine.editBookingAmounts(store, 'bk-room', { paidMinor: 35000, unpaidMinor: 6000 });
+  assert.equal(edit.ok, true);
+  const ap = engine.approvePacket(store);
+  assert.equal(ap.ok, true);
+  assert.ok(ap.result.rejected.some((r) => r.bookingId === 'bk-room' && r.reason === 'invalid'));
+  assert.equal(request(store, 'bk-room').status, 'excluded');
+  assert.equal(request(store, 'bk-room').reason, 'invalid');
+  const ex = engine.executeRequest(store, rid('bk-room'));
+  assert.equal(ex.ok, false);
+  assert.equal(store.listOutcomesForRequest(rid('bk-room')).length, 0, 'no provider call, no confirmation');
+  assert.equal(booking(store, 'bk-room').status, 'active');
+  // Other valid approvals are unaffected.
+  assert.equal(request(store, 'bk-catering').status, 'approved');
+});
+
+/* ---- money lifecycle: potential -> approved -> due -> received ---- */
+test('money lifecycle keeps remaining potential, packet estimate, due, and received distinct', () => {
+  const store = freshStore();
+  engine.cancelEvent(store);
+  engine.preparePacket(store);
+  engine.approvePacket(store);
+  engine.executePacket(store);
+  const t = snap(store).totals;
+  assert.equal(t.estimatedRefundableMinor, 0, 'no assessed bookings remain active');
+  assert.equal(t.packetRefundableMinor, 55000, 'the approved packet estimate is preserved, labeled');
+  assert.equal(t.confirmedRefundsDueMinor, 55000, 'all approved refunds outstanding');
+  assert.equal(t.receivedRefundsMinor, 0);
+  assert.equal(t.confirmedCancellations, 3);
+  assert.equal(t.failedCancellations, 1, 'equipment scripted 503 counts as failed, not confirmed');
+  engine.executeRequest(store, rid('bk-equipment')); // retry succeeds
+  const t2 = snap(store).totals;
+  assert.equal(t2.confirmedCancellations, 4);
+  assert.equal(t2.confirmedRefundsDueMinor, 55000, 'retry does not double-count');
+  engine.markRefundReceived(store, rid('bk-room'));
+  const t3 = snap(store).totals;
+  assert.equal(t3.receivedRefundsMinor, 40000);
+  assert.equal(t3.confirmedRefundsDueMinor, 15000, 'received cash leaves the due bucket');
 });
 
 /* ---- reset determinism ---- */
@@ -332,7 +435,12 @@ test('reset restores identical fixture state (Q03)', () => {
   engine.preparePacket(store);
   engine.approvePacket(store);
   engine.executePacket(store);
-  const strip = (s) => JSON.stringify(s, (k, v) => (k === 'epoch' ? 0 : v));
+  // Identity fields embed the epoch (req-<b>-e<N>, ...|pkt|e<N>) — normalize
+  // them so the comparison tests state identity, not the epoch counter.
+  const strip = (s) =>
+    JSON.stringify(s, (k, v) =>
+      k === 'epoch' ? 0 : typeof v === 'string' ? v.replace(/-e\d+$/, '-eN').replace(/\|e\d+$/, '|eN') : v,
+    );
   const snapA = strip(snap(store));
   engine.reset(store, buildSeed().seed);
   assert.equal(strip(snap(store)), strip(snap(createMemStore(buildSeed().seed))));
@@ -343,15 +451,52 @@ test('reset restores identical fixture state (Q03)', () => {
   assert.equal(strip(snap(store)), snapA);
 });
 
+/* ---- request identity is epoch-scoped: pre-reset ids can never act ---- */
+test('reset mints new request ids; a dead-epoch id cannot execute the new request', () => {
+  const store = freshStore();
+  engine.cancelEvent(store);
+  engine.preparePacket(store);
+  engine.approvePacket(store);
+  const oldId = request(store, 'bk-room').requestId;
+  assert.equal(oldId, rid('bk-room', 1));
+  engine.reset(store, buildSeed().seed);
+  assert.equal(store.epoch(), 2);
+  engine.cancelEvent(store);
+  engine.preparePacket(store);
+  engine.approvePacket(store);
+  const newId = request(store, 'bk-room').requestId;
+  assert.equal(newId, rid('bk-room', 2));
+  assert.ok(!store.getRequest(oldId), 'dead-epoch id does not resolve');
+  // Even if a stale client crafts the call, there is nothing to execute.
+  engine.executeRequest(store, oldId);
+  assert.equal(request(store, 'bk-room').status, 'approved', 'old id never touched the new request');
+});
+
+/* ---- persisted browser state is schema-validated ---- */
+test('memstore.restore rejects valid JSON with a broken schema instead of crashing', () => {
+  const store = freshStore();
+  assert.equal(store.restore(JSON.stringify({ bookings: null })), false);
+  assert.equal(store.restore(JSON.stringify({ bookings: [] })), false, 'missing fields is still invalid');
+  assert.equal(store.restore(JSON.stringify('plain string')), false);
+  // Store still works — state untouched.
+  const s = snap(store);
+  assert.equal(s.bookings.length, 5);
+  assert.equal(typeof s.epoch, 'number');
+  // A well-formed payload restores.
+  const serialized = store.serialize();
+  store.resetAll(buildSeed().seed);
+  assert.equal(store.restore(serialized), true);
+});
+
 /* ---- approvals can never execute unapproved / excluded requests ---- */
 test('unapproved or excluded requests cannot execute', () => {
   const store = freshStore();
   engine.cancelEvent(store);
   engine.preparePacket(store);
-  const r = engine.executeRequest(store, 'req-bk-room');
+  const r = engine.executeRequest(store, rid('bk-room'));
   assert.equal(r.ok, false);
   assert.equal(r.code, 'invalid_state');
-  const r2 = engine.executeRequest(store, 'req-bk-decor');
+  const r2 = engine.executeRequest(store, rid('bk-decor'));
   assert.equal(r2.ok, false);
   assert.equal(r2.code, 'invalid_state');
 });

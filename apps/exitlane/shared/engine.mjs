@@ -313,7 +313,9 @@ function upsertAssessmentRequest(store, booking, a, nowMs) {
     status = 'prepared';
   }
   const row = {
-    requestId: existing?.requestId ?? `req-${booking.bookingId}`,
+    // Epoch-scoped identity: a requestId held from before a reset can never
+    // address a request in the new epoch.
+    requestId: existing?.requestId ?? `req-${booking.bookingId}-e${store.epoch()}`,
     bookingId: booking.bookingId,
     status,
     reason,
@@ -326,7 +328,7 @@ function upsertAssessmentRequest(store, booking, a, nowMs) {
     approvedAvoidedMinor: null,
     approvedNetMinor: null,
     staleReason: null,
-    idempotencyKey: `exitlane|${booking.bookingId}|pkt`,
+    idempotencyKey: `exitlane|${booking.bookingId}|pkt|e${store.epoch()}`,
     updatedAt: nowMs,
   };
   if (existing) {
@@ -362,6 +364,7 @@ export function approvePacket(store) {
     const now = store.getClockMs();
     const approved = [];
     const skipped = [];
+    const rejected = [];
     for (const req of store.listRequests()) {
       if (req.status !== 'prepared') {
         if (req.status !== 'excluded') skipped.push(req.bookingId);
@@ -370,6 +373,25 @@ export function approvePacket(store) {
       // Approval binds the fingerprint assessed right now — not a stale one.
       const booking = store.getBooking(req.bookingId);
       const a = assessBooking(store, booking, now);
+      if (a.status !== 'assessed') {
+        // A booking that became invalid/manual_review since prepare can never
+        // be approved — it drops out of the packet with its reason, so
+        // execution can never confirm a fake figure.
+        store.updateRequest(req.requestId, {
+          status: 'excluded',
+          reason: a.status,
+          fingerprint: a.fingerprint,
+          assessedInstant: new Date(now).toISOString(),
+        });
+        store.addEvent({
+          kind: 'excluded',
+          bookingId: req.bookingId,
+          detail: `Request '${req.requestId}' dropped from the packet at approval: assessment is '${a.status}' (${a.reason ?? 'not executable'}).`,
+        });
+        skipped.push(req.bookingId);
+        rejected.push({ bookingId: req.bookingId, reason: a.status });
+        continue;
+      }
       store.updateRequest(req.requestId, {
         status: 'approved',
         fingerprint: a.fingerprint,
@@ -389,7 +411,7 @@ export function approvePacket(store) {
         ? `Cancellation packet approved at ${new Date(now).toISOString()} (demo clock): ${approved.join(', ')}. Approvals bind the current booking + policy versions and assessed figures.`
         : 'No executable requests to approve.',
     });
-    return ok({ approved, skipped });
+    return ok({ approved, skipped, rejected });
   });
 }
 
@@ -434,12 +456,13 @@ export function executeRequest(store, requestId) {
     }
     const booking = store.getBooking(req.bookingId);
     if (!booking) return fail(404, 'not_found', `booking '${req.bookingId}' missing`);
-    if (req.status === 'approved') {
-      // Recalculate immediately before execution (spec). Any change —
-      // clock, booking, policy — invalidates the approval and no provider
-      // is contacted.
+    if (req.status === 'approved' || req.status === 'failed') {
+      // Recalculate immediately before execution (spec) — for retries too.
+      // A failed request still carries the approval it ran under; any change
+      // — clock, booking, policy — invalidates it and no provider is
+      // contacted. Attempt history is preserved untouched.
       const a = assessBooking(store, booking, now);
-      if (a.fingerprint !== req.approvedFingerprint) {
+      if (a.fingerprint !== req.approvedFingerprint || a.status !== 'assessed') {
         store.updateRequest(requestId, {
           status: 'stale',
           staleReason: 'assessment_changed',
@@ -497,9 +520,30 @@ export function executePacket(store) {
   return store.transact(() => {
     const results = [];
     for (const req of store.listRequests()) {
-      if (req.status !== 'approved') continue;
+      if (req.status !== 'approved') {
+        // Report non-executable requests with the reason so callers can
+        // distinguish refused-stale from never-in-packet exclusions.
+        results.push({
+          bookingId: req.bookingId,
+          requestId: req.requestId,
+          ok: false,
+          skipped: true,
+          status: req.status,
+          reason:
+            req.status === 'stale'
+              ? `stale (${req.staleReason ?? 'assessment changed'}) — re-prepare and re-approve before executing`
+              : req.status === 'excluded'
+                ? `excluded: ${req.reason ?? 'not executable'}`
+                : req.status === 'executed'
+                  ? 'already executed'
+                  : req.status === 'failed'
+                    ? 'failed — retry individually'
+                    : 'not approved',
+        });
+        continue;
+      }
       const r = executeRequest(store, req.requestId);
-      results.push({ bookingId: req.bookingId, ok: r.ok, status: store.getRequest(req.requestId).status, stale: !!r.result?.stale });
+      results.push({ bookingId: req.bookingId, requestId: req.requestId, ok: r.ok, status: store.getRequest(req.requestId).status, stale: !!r.result?.stale });
     }
     return ok({ results });
   });
@@ -584,10 +628,17 @@ function totalsFor(bookings, assessments, requests, outcomes) {
   let estimatedFutureChargesAvoidedMinor = 0;
   let estimatedExtraChargesMinor = 0;
   let netEstimatedBenefitMinor = 0;
+  /** Outstanding: approved refund minus marked-received, per request. */
   let confirmedRefundsDueMinor = 0;
   let receivedRefundsMinor = 0;
+  let packetRefundableMinor = 0;
+  let confirmedCancellations = 0;
+  let failedCancellations = 0;
+  let queuedCancellations = 0;
   for (const b of bookings) {
     const a = assessments.get(b.bookingId);
+    // Remaining potential: only bookings that are still active can still be
+    // canceled — confirmed ones move into the due/received lines below.
     if (a?.status === 'assessed' && b.status === 'active') {
       estimatedRefundableMinor += a.refundMinor;
       estimatedFutureChargesAvoidedMinor += a.futureChargesAvoidedMinor;
@@ -596,8 +647,21 @@ function totalsFor(bookings, assessments, requests, outcomes) {
     }
   }
   for (const req of requests) {
+    if (req.status === 'executed') confirmedCancellations += 1;
+    if (req.status === 'failed') failedCancellations += 1;
+    if (req.status === 'approved') queuedCancellations += 1;
+    // The packet's figure at approval — preserved after execution so the
+    // reviewed amount never silently disappears.
+    if (['approved', 'executed', 'failed'].includes(req.status) && req.approvedRefundMinor != null) {
+      packetRefundableMinor += req.approvedRefundMinor;
+    }
     if (req.status === 'executed' && req.approvedRefundMinor != null) {
-      confirmedRefundsDueMinor += req.approvedRefundMinor;
+      // Outstanding due = approved estimate minus what's already marked
+      // received — never counts the same cents in both lines.
+      confirmedRefundsDueMinor += Math.max(
+        req.approvedRefundMinor - (req.refundReceivedMinor ?? 0),
+        0,
+      );
     }
     if (req.refundReceivedMinor != null) {
       receivedRefundsMinor += req.refundReceivedMinor;
@@ -610,6 +674,10 @@ function totalsFor(bookings, assessments, requests, outcomes) {
     netEstimatedBenefitMinor,
     confirmedRefundsDueMinor,
     receivedRefundsMinor,
+    packetRefundableMinor,
+    confirmedCancellations,
+    failedCancellations,
+    queuedCancellations,
     outcomeCount: outcomes.length,
     note: 'Estimated figures assume the structured policy is the complete remaining obligation. Sandbox confirmations are simulated and are not proof that cash reached an account.',
   };

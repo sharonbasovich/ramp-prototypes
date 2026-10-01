@@ -62,9 +62,14 @@ matched tier with cancellation fee `F`:
 - future charges avoided `= U` — labeled separately, never added to "cash back"
 - net benefit `= refund + U − extra = C − F` — **negative values preserved**
 
-Three states are kept distinct everywhere: **confirmed cancellation** (sandbox
-provider said yes), **estimated refund due**, and **received refund** (marked
-explicitly, counts once).
+The summary keeps the lifecycle self-explanatory: **remaining potential**
+(`Refundable if canceled now` — still-active assessed bookings only), **approved
+packet estimate** (the figure bound at approval, preserved after execution),
+**refunds due** (approved minus marked-received — never double-counted), and
+**refunds received** (marked explicitly, counts once). Simulated cancellations
+are counted numerically (confirmed / queued / failed), never as a vague count.
+`POST /api/packet/execute` reports every request — skipped entries carry a
+reason distinguishing refused-stale from never-in-packet exclusions.
 
 ## Policy engine
 
@@ -79,11 +84,23 @@ contradictory structure). The engine never invents a refund.
 Approvals bind a fingerprint of booking version + policy version + every
 assessed figure. Any change — clock crossing a cutoff, edited amounts —
 invalidates the approval *before* execution; executing a stale request returns
-`stale` and no provider call is made.
+`stale` and no provider call is made. The same revalidation runs on every
+execution path — including retries of `failed` requests — so a failed attempt
+followed by a change requires fresh review before the provider is contacted.
+Approval itself re-assesses the packet: a booking whose arithmetic broke since
+`prepare` is rejected (`excluded`/`invalid`), never confirmed.
 
 Sandbox providers consume scripted outcomes (`fail:<code>:<detail>` entries
 simulate outages). Executed requests are replayed by idempotency key — the same
 key can never cancel twice, and retries append attempt history.
+
+Request identity is epoch-scoped (`req-<bookingId>-e<epoch>`). A reset mints
+new ids, so a requestId captured before a reset can never execute a request in
+a later demo epoch — it resolves to nothing (HTTP 404).
+
+Browser persistence is schema-validated: `localStorage` payloads that parse
+but don't match the store shape (e.g. `{bookings:null}`) are rejected and the
+tab starts from a fresh seed rather than crashing on render.
 
 ## API (local backend)
 
@@ -91,7 +108,7 @@ key can never cancel twice, and retries append attempt history.
 | --- | --- |
 | `GET /api/health` | `{ ok, engine:"sqlite", mode, epoch }` |
 | `GET /api/state` | full snapshot: clock, event, bookings + assessment + request + outcomes, totals, timeline, activity log |
-| `POST /api/reset` | `{config?}` re-seed (epoch bump — old approvals invalidated) |
+| `POST /api/reset` | `{config?}` re-seed (epoch bump — old approvals invalidated; old request ids die) |
 | `POST /api/clock` | `{instant}` move the demo clock; marks stale approvals |
 | `POST /api/event/cancel` | mark the event canceled |
 | `POST /api/packet/prepare` | assemble packet: `prepared` / `excluded` per booking |
@@ -124,8 +141,10 @@ review, negative net benefit preserved, `C ≠ P + U` and non-USD rejected,
 pre-canceled exclusion, approve→clock-move→stale execution refusal, provider
 failure leaves booking active, idempotent replay + retry attempt history,
 concurrent double-execution single-outcome, export state separation,
-received-refund-once, epoch-based reset. See `tests/engine.test.mjs` and
-`tests/acceptance.test.mjs`.
+received-refund-once, epoch-scoped request identity (dead-epoch ids 404),
+approval rejection of invalidated assessments (engine + HTTP), failed-retry
+approval revalidation (engine + HTTP), and malformed `localStorage` payload
+recovery. See `tests/engine.test.mjs` and `tests/acceptance.test.mjs`.
 
 ## Scope and limitations
 

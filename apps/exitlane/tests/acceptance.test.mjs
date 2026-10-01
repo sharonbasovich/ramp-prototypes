@@ -76,6 +76,12 @@ function rowFor(s, bookingId) {
   return s.bookings.find((b) => b.bookingId === bookingId);
 }
 
+// Request ids are epoch-scoped (`req-<booking>-e<epoch>`); read the live id
+// from state so tests hold the real identity for the current demo epoch.
+function requestIdFor(s, bookingId) {
+  return rowFor(s, bookingId).request.requestId;
+}
+
 before(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), 'exitlane-test-'));
   child = spawn(process.execPath, [join(APP, 'server', 'index.mjs')], {
@@ -95,9 +101,27 @@ before(async () => {
   throw new Error('server did not start');
 });
 
-after(() => {
-  child?.kill('SIGTERM');
-  rmSync(tmpDir, { recursive: true, force: true });
+after(async () => {
+  // Wait for the server process to fully exit (it closes its sqlite handle on
+  // SIGTERM) before removing the temp dir — Windows returns EBUSY otherwise.
+  if (child && child.exitCode === null && child.signalCode === null) {
+    const exited = new Promise((resolve) => {
+      child.once('close', resolve);
+      setTimeout(resolve, 8000);
+    });
+    child.kill('SIGTERM');
+    await exited;
+  }
+  // Retry removal in case the file lock lingers a beat after process close.
+  for (let i = 0; ; i++) {
+    try {
+      rmSync(tmpDir, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      if (i >= 9) throw err;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
 });
 
 async function resetSeed() {
@@ -154,6 +178,14 @@ test('stale approval: clock across cutoff refuses execution before provider call
   assert.deepEqual(r.json.result.staleBookings, ['tb-room']);
   const ex = await api('/api/packet/execute', {});
   assert.equal(ex.json.ok, true);
+  // Every request is reported: executables ran, the rest are skipped with a reason.
+  const byBooking = Object.fromEntries(ex.json.result.results.map((r) => [r.bookingId, r]));
+  assert.equal(byBooking['tb-room'].skipped, true);
+  assert.equal(byBooking['tb-room'].status, 'stale');
+  assert.match(byBooking['tb-room'].reason, /stale/);
+  assert.equal(byBooking['tb-decor'].skipped, true);
+  assert.match(byBooking['tb-decor'].reason, /excluded: manual_review/);
+  assert.equal(byBooking['tb-shuttle'].status, 'executed');
   const s = await state();
   assert.equal(rowFor(s, 'tb-room').request.status, 'stale');
   assert.equal(rowFor(s, 'tb-room').outcomes.length, 0, 'no sandbox call recorded');
@@ -165,6 +197,44 @@ test('stale approval: clock across cutoff refuses execution before provider call
   assert.equal(rowFor(s2, 'tb-room').request.status, 'executed');
 });
 
+test('approval refuses a booking invalidated since prepare; retry on a failed request re-verifies (P1)', async () => {
+  await resetSeed();
+  await api('/api/event/cancel', {});
+  await api('/api/packet/prepare', {});
+  // Break C = P + U on tb-room between prepare and approve.
+  const edit = await api('/api/bookings/amounts', { bookingId: 'tb-room', paidMinor: 35000, unpaidMinor: 6000 });
+  assert.equal(edit.json.ok, true);
+  const ap = await api('/api/packet/approve', {});
+  assert.equal(ap.json.ok, true);
+  assert.ok(ap.json.result.rejected.some((r) => r.bookingId === 'tb-room' && r.reason === 'invalid'));
+  let s = await state();
+  assert.equal(rowFor(s, 'tb-room').request.status, 'excluded');
+  const ex = await api(`/api/requests/${requestIdFor(s, 'tb-room')}/execute`, {});
+  assert.equal(ex.status, 409);
+  assert.equal(rowFor(s, 'tb-room').outcomes.length, 0, 'no sandbox confirmation possible');
+});
+
+test('failed retry after a booking change is refused stale over HTTP; fresh review restores (P1)', async () => {
+  await resetSeed();
+  await flowUntilApproved();
+  let s = await state();
+  const avReq = requestIdFor(s, 'tb-av');
+  await api(`/api/requests/${avReq}/execute`, {}); // scripted failure
+  const edit = await api('/api/bookings/amounts', { bookingId: 'tb-av', committedMinor: 21000, paidMinor: 21000, unpaidMinor: 0 });
+  assert.equal(edit.json.ok, true);
+  const retry = await api(`/api/requests/${avReq}/execute`, {});
+  assert.equal(retry.json.result.stale, true, 'retry must refuse the stale approval before any provider call');
+  s = await state();
+  assert.equal(rowFor(s, 'tb-av').request.status, 'stale');
+  assert.equal(rowFor(s, 'tb-av').outcomes.length, 1, 'attempt history preserved, no new provider call');
+  await api('/api/packet/prepare', {});
+  await api('/api/packet/approve', {});
+  const again = await api(`/api/requests/${avReq}/execute`, {});
+  assert.equal(again.json.result.outcome.outcome, 'confirmed');
+  s = await state();
+  assert.equal(rowFor(s, 'tb-av').outcomes.length, 2);
+});
+
 test('booking edit after approval invalidates it (E12)', async () => {
   await resetSeed();
   await flowUntilApproved();
@@ -174,7 +244,7 @@ test('booking edit after approval invalidates it (E12)', async () => {
   const b = rowFor(s, 'tb-room');
   assert.equal(b.version, 2);
   assert.equal(b.request.status, 'stale');
-  const ex = await api('/api/requests/req-tb-room/execute', {});
+  const ex = await api(`/api/requests/${rowFor(s, 'tb-room').request.requestId}/execute`, {});
   assert.equal(ex.status, 409);
   assert.equal(ex.json.error.code, 'stale');
 });
@@ -182,12 +252,14 @@ test('booking edit after approval invalidates it (E12)', async () => {
 test('provider failure then retry: history kept, totals honest (E06/E07)', async () => {
   await resetSeed();
   await flowUntilApproved();
-  const f = await api('/api/requests/req-tb-av/execute', {});
-  assert.equal(f.json.result.outcome.outcome, 'failed');
   let s = await state();
+  const avReq = requestIdFor(s, 'tb-av');
+  const f = await api(`/api/requests/${avReq}/execute`, {});
+  assert.equal(f.json.result.outcome.outcome, 'failed');
+  s = await state();
   assert.equal(rowFor(s, 'tb-av').status, 'active');
   assert.equal(s.totals.confirmedRefundsDueMinor, 0);
-  const r = await api('/api/requests/req-tb-av/execute', {});
+  const r = await api(`/api/requests/${avReq}/execute`, {});
   assert.equal(r.json.result.outcome.outcome, 'confirmed');
   s = await state();
   const av = rowFor(s, 'tb-av');
@@ -195,7 +267,7 @@ test('provider failure then retry: history kept, totals honest (E06/E07)', async
   assert.equal(av.outcomes.length, 2);
   assert.equal(s.totals.confirmedRefundsDueMinor, 20000);
   // idempotent replay
-  const again = await api('/api/requests/req-tb-av/execute', {});
+  const again = await api(`/api/requests/${avReq}/execute`, {});
   assert.equal(again.json.result.replayed, true);
   s = await state();
   assert.equal(rowFor(s, 'tb-av').outcomes.length, 2);
@@ -227,15 +299,16 @@ test('unsupported + invalid bookings are excluded and never executable (E08/E10)
   assert.equal(rowFor(s, 'tb-decor').request.reason, 'manual_review');
   assert.equal(rowFor(s, 'tb-bad').request.status, 'excluded');
   assert.equal(rowFor(s, 'tb-bad').request.reason, 'invalid');
-  const ex = await api('/api/requests/req-tb-decor/execute', {});
+  const ex = await api(`/api/requests/${requestIdFor(s, 'tb-decor')}/execute`, {});
   assert.equal(ex.status, 409);
 });
 
 test('export distinguishes confirmed/failed/excluded/approved and labels simulated + mode (E13)', async () => {
   await resetSeed();
   await flowUntilApproved();
-  await api('/api/requests/req-tb-room/execute', {});
-  await api('/api/requests/req-tb-av/execute', {}); // fails first attempt
+  const s0 = await state();
+  await api(`/api/requests/${requestIdFor(s0, 'tb-room')}/execute`, {});
+  await api(`/api/requests/${requestIdFor(s0, 'tb-av')}/execute`, {}); // fails first attempt
   const { json } = await api('/api/packet/export');
   assert.equal(json.ok, true);
   const p = json.result;
@@ -253,15 +326,17 @@ test('export distinguishes confirmed/failed/excluded/approved and labels simulat
 test('confirmed cancellation != received cash; receipt marks once (E14)', async () => {
   await resetSeed();
   await flowUntilApproved();
-  await api('/api/requests/req-tb-room/execute', {});
   let s = await state();
+  const roomReq = requestIdFor(s, 'tb-room');
+  await api(`/api/requests/${roomReq}/execute`, {});
+  s = await state();
   assert.equal(s.totals.confirmedRefundsDueMinor, 40000);
   assert.equal(s.totals.receivedRefundsMinor, 0);
-  const m = await api('/api/requests/req-tb-room/refund-received', {});
+  const m = await api(`/api/requests/${roomReq}/refund-received`, {});
   assert.equal(m.json.ok, true);
   s = await state();
   assert.equal(s.totals.receivedRefundsMinor, 40000);
-  const m2 = await api('/api/requests/req-tb-room/refund-received', {});
+  const m2 = await api(`/api/requests/${roomReq}/refund-received`, {});
   assert.equal(m2.json.result.replayed, true);
   assert.equal((await state()).totals.receivedRefundsMinor, 40000);
 });
@@ -269,23 +344,34 @@ test('confirmed cancellation != received cash; receipt marks once (E14)', async 
 test('double execution across concurrent HTTP calls records exactly one outcome (idempotency)', async () => {
   await resetSeed();
   await flowUntilApproved();
+  const roomReq = requestIdFor(await state(), 'tb-room');
   const [a, b] = await Promise.all([
-    api('/api/requests/req-tb-room/execute', {}),
-    api('/api/requests/req-tb-room/execute', {}),
+    api(`/api/requests/${roomReq}/execute`, {}),
+    api(`/api/requests/${roomReq}/execute`, {}),
   ]);
   const outcomes = (await state()).bookings.find((x) => x.bookingId === 'tb-room').outcomes;
   assert.equal(outcomes.length, 1, `expected exactly one recorded outcome, got ${outcomes.length} (${a.status}/${b.status})`);
 });
 
-test('reset bumps epoch; dead-epoch request ids are unknown (404)', async () => {
+test('reset bumps epoch; a request id from a dead epoch can never act (404)', async () => {
   await resetSeed();
   await flowUntilApproved();
-  const e1 = (await state()).epoch;
+  let s = await state();
+  const e1 = s.epoch;
+  const deadReq = requestIdFor(s, 'tb-room');
+  assert.match(deadReq, new RegExp(`^req-tb-room-e${e1}$`), 'request identity is epoch-scoped');
   await resetSeed();
-  const s = await state();
+  s = await state();
   assert.equal(s.epoch, e1 + 1);
-  const ex = await api('/api/requests/req-tb-room/execute', {});
+  // The old id must not resolve — and can never alias the new epoch's request.
+  const ex = await api(`/api/requests/${deadReq}/execute`, {});
   assert.equal(ex.status, 404);
+  await flowUntilApproved();
+  s = await state();
+  const newReq = requestIdFor(s, 'tb-room');
+  assert.equal(newReq, `req-tb-room-e${e1 + 1}`);
+  const ok = await api(`/api/requests/${newReq}/execute`, {});
+  assert.equal(ok.json.result.outcome.outcome, 'confirmed');
 });
 
 test('unknown routes and malformed bodies fail cleanly', async () => {

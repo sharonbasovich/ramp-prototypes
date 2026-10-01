@@ -215,8 +215,8 @@ export default function App() {
             <p className="cell-sub dim side-note">Cancel the event to assemble the cancellation packet.</p>
           )}
           <ConfirmationsCard bookings={snap.bookings} />
-          <section className="card activity-card" aria-label="Activity">
-            <h2>Activity</h2>
+          <details className="card activity-card">
+            <summary>Activity log</summary>
             <ul className="activity">
               {snap.events.slice(0, 8).map((e) => (
                 <li key={e.seq}>
@@ -225,7 +225,7 @@ export default function App() {
                 </li>
               ))}
             </ul>
-          </section>
+          </details>
         </aside>
       </div>
 

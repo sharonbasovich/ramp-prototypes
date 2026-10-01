@@ -118,12 +118,19 @@ export interface TimelineNode {
 }
 
 export interface Totals {
+  /** Remaining potential — only still-active assessed bookings. */
   estimatedRefundableMinor: number;
   estimatedFutureChargesAvoidedMinor: number;
   estimatedExtraChargesMinor: number;
   netEstimatedBenefitMinor: number;
+  /** Executed requests: the approved refund now due (simulated). */
   confirmedRefundsDueMinor: number;
   receivedRefundsMinor: number;
+  /** Sum of approvedRefundMinor over approved/executed/failed requests. */
+  packetRefundableMinor: number;
+  confirmedCancellations: number;
+  failedCancellations: number;
+  queuedCancellations: number;
   outcomeCount: number;
   note: string;
 }
