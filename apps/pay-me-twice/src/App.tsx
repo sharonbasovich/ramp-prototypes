@@ -4,7 +4,7 @@ import type {
 } from './types';
 import { connect } from './api';
 import { BASE_INVOICE, buildScenarioDocument } from '../engine/documents.mjs';
-import { normalizeFacts, sha256Hex } from '../engine/engine.mjs';
+import { factsSourceAfterEdit, normalizeFacts, sha256Hex } from '../engine/engine.mjs';
 import Header from './components/Header';
 import InvoiceDetailsCard from './components/InvoiceDetailsCard';
 import InvoiceDocumentCard from './components/InvoiceDocumentCard';
@@ -184,7 +184,7 @@ export default function App() {
         const merged = normalizeFacts({
           supplier: f.supplier ?? '',
           invoiceNumber: f.invoiceNumber ?? '',
-          currency: f.currency ?? 'USD',
+          currency: f.currency ?? '',
           amountCents: f.amountCents ?? null,
           period: f.period ?? '',
           items: f.items ?? [],
@@ -197,6 +197,7 @@ export default function App() {
         const missing = [
           !merged.supplier && 'supplier',
           !merged.invoiceNumber && 'invoice number',
+          !merged.currency && 'currency',
           merged.amountCents == null && 'amount',
         ].filter(Boolean).join(', ');
         setUploadNote(missing
@@ -204,7 +205,7 @@ export default function App() {
           : `Extracted ${res.found.length} field(s) from ${res.filename} — confirm or edit before validating.`);
       } else {
         setFacts(normalizeFacts({
-          supplier: '', invoiceNumber: '', currency: 'USD', amountCents: null,
+          supplier: '', invoiceNumber: '', currency: '', amountCents: null,
           period: '', items: [], filename: res.filename,
           factsSource: 'manual', docSupported: false,
         }));
@@ -221,7 +222,7 @@ export default function App() {
   const stats = state?.stats;
   // A required fact missing means the current document didn't state it and
   // nothing was kept from before — the user must complete it before validating.
-  const factsComplete = !!(facts.supplier && facts.invoiceNumber && facts.amountCents != null);
+  const factsComplete = !!(facts.supplier && facts.invoiceNumber && facts.amountCents != null && facts.currency);
 
   return (
     <div className="page">
@@ -254,11 +255,11 @@ export default function App() {
             canValidate={factsComplete}
             canReplay={!!lastRequestId.current}
             onFactsChange={(patch) =>
-              setFacts((f) => ({ ...f, ...patch, factsSource: f.factsSource === 'extracted' ? 'extracted' : 'manual' }))
+              setFacts((f) => ({ ...f, ...patch, factsSource: factsSourceAfterEdit(f.factsSource) }))
             }
             onAmountChange={(text, cents) => {
               setAmountText(text);
-              setFacts((f) => ({ ...f, amountCents: cents, factsSource: f.factsSource === 'extracted' ? 'extracted' : 'manual' }));
+              setFacts((f) => ({ ...f, amountCents: cents, factsSource: factsSourceAfterEdit(f.factsSource) }));
             }}
             onScenario={applyScenario}
             onValidate={scenario === 'burst' ? doBurst : doValidate}

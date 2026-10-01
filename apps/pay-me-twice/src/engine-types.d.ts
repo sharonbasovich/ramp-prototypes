@@ -11,6 +11,7 @@ declare module '*engine/engine.mjs' {
   export function normalizeSupplier(v: unknown): string;
   export function normalizeInvoiceNumber(v: unknown): string;
   export function normalizeCurrency(v: unknown): string;
+  export function factsSourceAfterEdit(source: FactsSource | string): FactsSource;
   export function normalizeFacts(f: Partial<InvoiceFacts>): InvoiceFacts;
   export function validateFacts(f: InvoiceFacts): string[];
   export function itemsSignature(items: LineItem[]): string;

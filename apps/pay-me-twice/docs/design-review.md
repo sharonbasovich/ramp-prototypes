@@ -70,14 +70,18 @@ Compared `pay-me-twice-concept.png` (1536x1024) against live captures in
 ## Upload safety rules (audit fixes)
 
 - A new document **never retains** prior or sample values for supplier,
-  invoice number, amount, or period. Extraction fills only what the text
-  states; everything else stays blank and the form says which required
-  facts are missing.
-- **Pay is blocked until verified**: supplier + invoice number + amount
-  must all be present before Validate / Try to get paid / Replay can run,
-  with an inline note that missing facts are never backfilled.
+  invoice number, amount, currency, or period. Extraction fills only what
+  the text states; everything else stays blank and the form says which
+  required facts are missing. A total with no currency code leaves
+  currency unstated — the user must pick one explicitly; USD is never
+  assumed.
+- **Pay is blocked until verified**: supplier + invoice number + amount +
+  currency must all be present before Validate / Try to get paid / Replay
+  can run, with an inline note that missing facts are never backfilled.
 - `factsSource` stays honest: extraction-filled fields are "extracted",
-  fields the user typed become "manual".
+  fields the user typed are "manual", and editing extracted/sample facts
+  marks the record "document + manual edits" (mixed) — never silently
+  relabeled as pure extraction.
 - The native PDF reader parses escaped literal strings (`\(`, `\)`, `\\`,
   octal escapes, line continuations, nested balanced parens) across `Tj`,
   `TJ`, and `'` operators, so `Total \(USD\) $17.25` extracts as $17.25.
@@ -101,14 +105,19 @@ Compared `pay-me-twice-concept.png` (1536x1024) against live captures in
 - Grid items' min-content could force the one-column mobile track wider
   than the viewport (390px → scrollWidth 437 in QA) → tracks are now
   `minmax(0, 1fr)` at every breakpoint.
+- The invoice paper's meta row (invoice block + bill-to) overflowed its
+  card at 390px → it stacks vertically below 560px.
 
 ## Mobile (390px)
 
 Topbar stacks, the workspace goes single-column via `minmax(0, 1fr)` tracks,
 fact fields are one column below 560px, all inputs and controls have
-`min-width: 0`, and the ledger table scrolls horizontally inside its card.
-Verified at a true 390px viewport: `scrollWidth == innerWidth == 390` — no
-horizontal page overflow (`mobile-initial.png`).
+`min-width: 0`, the invoice meta block stacks vertically, and the ledger
+table scrolls horizontally inside its own card (by design). Verified at a
+true 390px viewport: `documentElement.scrollWidth (375) <= innerWidth
+(390)` — no horizontal page overflow and no stray inner scrollbars
+(`mobile-initial.png`). Screenshots are captured at exact CSS viewport
+dimensions (1536x1024, 1366x768, 390x844, device scale reset).
 
 ## Known honest limitations (by design)
 

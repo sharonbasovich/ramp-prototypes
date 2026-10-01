@@ -70,6 +70,7 @@ export default function InvoiceDetailsCard({
               value={facts.currency}
               onChange={(e) => onFactsChange({ currency: e.target.value })}
             >
+              <option value="" disabled>Currency…</option>
               {CURRENCIES.map((c) => <option key={c}>{c}</option>)}
             </select>
             <input
@@ -90,7 +91,8 @@ export default function InvoiceDetailsCard({
       )}
       <p className="fact-source">
         Facts source: {facts.factsSource === 'extracted' ? 'extracted from document' :
-          facts.factsSource === 'manual' ? 'manual entry' : 'sample data'}
+          facts.factsSource === 'manual' ? 'manual entry' :
+          facts.factsSource === 'mixed' ? 'document + manual edits' : 'sample data'}
       </p>
 
       <h3 className="scenario-h">Validation scenario</h3>

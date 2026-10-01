@@ -273,7 +273,7 @@ export function extractFields(text) {
       if (m) {
         const cur = m.length > 2 ? m[1] : null;
         const raw = m.length > 2 ? m[2] : m[1];
-        facts.currency = /^[A-Z]{3}$/.test(cur || '') ? cur : 'USD';
+        if (cur && /^[A-Z]{3}$/.test(cur)) facts.currency = cur;
         const c = cents(raw);
         if (c != null) facts.amountCents = c;
         break;
