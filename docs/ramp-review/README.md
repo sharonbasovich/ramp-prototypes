@@ -1,56 +1,71 @@
-# Independent review: Ramp private-event prototypes
+# Independent review: Ramp private-event prototypes (re-review of repaired heads)
 
-This is a review-only branch. No app code was changed. Builders and the root owner make all fixes and merges.
+This is a review-only branch. No app code was changed and no builder fixes are duplicated here. Builders and the root owner handle fixes and merges. All work stays on the private event.
 
-| App | Branch / PR | Commit reviewed | Port |
-|---|---|---|---|
-| Cart Tetris | `codex/cart-tetris` / PR1 | `1090a66` | 5311 |
-| Budget Brawl | `codex/budget-brawl` / PR2 | `32468be` | 5314 |
-| BorrowFirst | `codex/borrowfirst` / PR3 | `e2942ab` | 5313 |
-| Pay Me Twice | `codex/pay-me-twice` / PR4 | `2ef72e2` | 5312 |
-| ExitLane | `codex/exitlane` | **Not reviewed: the branch was not on origin when this was written** | 5315 |
+| App | Branch | First review | **Repaired head reviewed** | Port |
+|---|---|---|---|---|
+| Cart Tetris (+ root runner) | `codex/cart-tetris` PR1 | `1090a66` | **`b09cc5a`** | 5311 |
+| Budget Brawl | `codex/budget-brawl` PR2 | `32468be` | `32468be` (no repaired head pushed yet) | 5314 |
+| BorrowFirst | `codex/borrowfirst` PR3 | `e2942ab` | **`ef0ad26`** | 5313 |
+| Pay Me Twice | `codex/pay-me-twice` PR4 | `2ef72e2` | **`2872c2e`** | 5312 |
+| ExitLane | `codex/exitlane` | — | **`31bc5d0`** | 5315 |
 
-## Checks run (Linux, Node 22.23.3; `npm test` also run on Node 22.14.0)
+## Checks (Node 22.14.0, Linux)
 
-| App | npm ci | test | build | typecheck | /api/health | static build (no backend) |
-|---|---|---|---|---|---|---|
-| Cart Tetris | ok | 27/27 (includes a 150-case brute-force oracle) | ok | ok | ok | ok: labeled "Browser sandbox" |
-| Budget Brawl | ok | 21/21 | ok | ok | ok | ok |
-| BorrowFirst | ok | 22/22 (includes worker-thread SQLite races) | ok | ok | ok | ok |
-| Pay Me Twice | ok | 29/29 | ok | ok | ok | ok |
+| App | npm ci | test | typecheck | build | /api/health |
+|---|---|---|---|---|---|
+| Cart `b09cc5a` | ok | 46/46, plus my 2-test independent oracle = 48/48 | ok | ok | sqlite |
+| Pay `2872c2e` | ok | 36/36 | ok | ok | sqlite |
+| Borrow `ef0ad26` | ok | 43/43 | ok | ok | sqlite |
+| Budget `32468be` | ok | 21/21 | ok | ok | sqlite |
+| Exit `31bc5d0` | ok | 32/32 (`node --test`) | ok | ok | sqlite |
 
-In static mode the browser console logs one 404 for `/api/health`. This is expected: the failed probe is how the app falls back to the honest "Browser sandbox" label.
+Static builds fall back to the "Browser sandbox" label; the console shows the expected `/api/health` 404. That 404 is the probe that triggers the fallback and is not a defect.
 
-## Independent adversarial probes (scripts in `probes/`, run against the SQLite servers)
+## Independent probes (`probes/`) on the repaired heads
 
-- **Budget Brawl:** I sent 20 concurrent $60 requests against a $100 budget. Exactly one held funds and the rest went to `awaiting_approval` with `fundsHeld:false`. Approving a request with no funds behind it returned `awaiting_funds`, with totals reserved 6000 and available 4000, so there was no overspend. Claimed prices are ignored in favor of the catalog price. Invalid quantities are rejected. A double cancel releases funds only once. A commit/cancel race ends with a single terminal winner.
-- **Pay Me Twice:** 20 concurrent requests with the same identity gave 1 `recorded` and 19 `duplicate`. A replay returned `replayed` with no new ledger row. The real next-period bill was `recorded`. A changed invoice number with no billing period went to `review` and was not paid.
-- **BorrowFirst:** I sent 10 parallel `/api/reserve` calls for the same B01 plan (M-101 + M-204). Results were one 200 and nine 409, leaving exactly 2 active reservations. The seed plan is 25500 versus a 67500 baseline, so potential avoided spending is 42000, which matches B01.
-- **Cart Tetris (UI):** The seed plan matches the spec: $81.50 versus $101.00, $19.50 less. With a 1-day deadline Bulk Club is excluded, giving $101.00 versus $101.00 and "$0.00 less". Changing the deadline or a quantity shows "Inputs changed", voids the approval and disables export. The exported JSON includes the disclaimer and assumptions.
+- **Cart** (`cart-oracle.test.ts`): my own brute-force solver checked 600 random cases covering $0 prices, minimum orders, free-ship thresholds, volume tiers, deadlines and stock limits. All 600 match `solve()`. Order totals equal the plan total, and no allocation exceeds the deadline or stock. Junk, `__proto__` and null imports never throw.
+- **Pay** (`pay3.mjs`): uploading a partial text file (invoice number and supplier only) gives `amountCents:null` and `period:""`, so no sample facts are inherited, and validate/pay return `invalid`. Escaped-paren PDF and FlateDecode PDF totals parse correctly. 20 concurrent requests gave 1 recorded and 19 duplicates. A negative amount and a 1.5¢ amount are both `invalid`.
+- **Borrow** (`borrow4.mjs`): B01 is 25500 versus 67500 with 42000 avoided. A forged plan total of 1 gets 409 `PLAN_MISMATCH`, and so does a forged unknown asset. 10 parallel reserves gave one 200 and nine 409s. Reservations survive a server restart.
+- **Exit** (`exit-assess.mjs`, `exithttp.mjs`, `exitstale.mjs`):
+  - Fee cases: E01 gives refund 0 / avoided 20000 / extra 5000 / net 15000. E02 gives refund 15000. E09 gives net −3000, not clamped.
+  - Cutoff boundaries: at the spring-forward cutoff (2025-03-09T07:00Z), 1 ms before uses the free tier and the exact instant uses the late tier. Overlapping tiers, no matching tier, an unparseable cutoff and an unsupported policy all go to `manual_review`. Floats, CAD and C≠P+U are `invalid`.
+  - Seed totals: estimated refundable 55000.
+  - Stale approval: after advancing the clock 2 days, only `bk-room` (whose tier changed) becomes `stale` and is skipped. The other bookings' figures are unchanged, so they still execute. That is correct.
+  - Idempotency: 8 concurrent `/packet/execute` calls left one outcome per booking.
+  - Export: says SIMULATED and states that confirmed ≠ received.
+  - Invalid inputs: bad clock values and float amounts return 400.
 
-## Concept vs. render at 1536×1024
+## Audit items, reassessed on the repaired heads
 
-All four apps follow their concept's composition: header, hook headline, a three-column workflow (or input plus table) and the result panel. They also apply the contract's required corrections: Cart arithmetic is fixed, BorrowFirst's invented People/Reports navigation is removed, and the sandbox labels are honest. The concept shows Budget Brawl after launch ($60 reserved / $40 available); the fresh app starts at $0 / $100 and reaches the concept state after one "Launch" click (`screenshots/budget-sqlite-1-launch.png`). I don't count that as a defect.
+| Item | Status |
+|---|---|
+| Cart: zero-price shipping and minimum orders, strict CSV/ID validation, irreversible approval, numeric ordering | Fixed. Verified by my oracle and junk-import probe; approval tests stay with the builder. |
+| Root runner on Windows (`spawnSync npm`, status `null`) | Fixed in `b09cc5a`: `npm_execpath` under the current Node, then `npm.cmd` with `shell` on win32, with `r.error` reported. Not run on a real Windows host. |
+| Pay: missing fields, escaped PDF totals, 2026 fixtures, mobile overflow | Fixed. 390px `scrollWidth` is 390. |
+| Borrow: forced selection, server plan validation, restart persistence, confirmed-plan UI, mobile overflow | Fixed. After reserving, the panel shows Proposed $255 with Confirmed $255 (`screenshots/borrow-final-after-reserve.png`). 390px `scrollWidth` is 390. |
+| Budget: holds swept only on GET, Windows test teardown, "Prevented" counting pending requests | **Not reassessed.** No repaired head had been pushed when this was written. |
 
-## P1 defects
+## Remaining findings (P1: none)
 
-None found in PR1–PR4.
+**P2**
+1. **ExitLane: results don't fit in 1536×1024.** The page is 1650px tall. The content is centered at about 1120px wide, while the concept uses the full width. Only Room, Catering and part of Equipment show above the fold; Shuttle, Decor, Provider confirmations and Policy evidence are below it (`screenshots/exit-1536.png` vs `exitlane-concept.png`). Fix: widen the container to about 1460px, put the timezone select on the control row, and tighten table row padding.
+2. **ExitLane: confusing summary after execution.** Repro: Cancel → Review packet → Approve → Execute. "Estimated refundable" drops to **$0** while "Refunds due (estimated)" shows $550, and the "Provider-confirmed cancellations" value reads "recorded below" (`screenshots/exit-mobile.png`). A viewer reads $0 as "nothing recovered". Fix: keep $550 with a "now confirmed → due" label, and show the confirmed count as a number.
+3. **ExitLane: the `/packet/execute` response silently omits stale bookings.** After the clock advance, the result lists 3 bookings, and `bk-room` (stale) is missing instead of being reported as `refused: stale`. The UI or API consumer cannot tell "skipped" from "not in packet". Fix: return stale and excluded entries with a reason.
+4. **Root runner: `runStart` removes items from `list` while iterating it.** In `scripts/run-apps.mjs`, `list.splice(list.indexOf(slug), 1)` inside `for (const slug of list)` makes the next app skip its dist check. If app A fails to build, app B is started without a build. I reproduced the skip semantics in Node. Fix: iterate over a copy, or filter after the loop.
 
-## P2 defects
+**P3**
+- **Pay:** the API accepts any 3-letter currency. `POST /api/pay` with `currency:"XXX"` returns `recorded`. The UI offers only USD/EUR/GBP. Restrict the allowlist on the server.
+- **Pay:** the billing-period date input is truncated at 1536 ("September 2⌷") next to "Not stated".
+- **Cart:** with a 1-day deadline the result reads "$0.00 less" with no explanation. Add "Only QuickBox delivers in 1 day".
 
-1. **Pay Me Twice: horizontal overflow at 390px.** Repro: open `:5312/` at a 390×844 viewport. `document.scrollWidth` is 437. The overflowing element is `section.card.details-card`: the `@media` rule keeps `.fields { grid-template-columns: 1fr 1fr }` and the inputs don't shrink. Screenshot: `screenshots/overflow-pay.png`. Fix: use a single column at ≤480px, or add `min-width:0` to `.field`. On mobile the ledger table also wraps invoice numbers mid-token.
-2. **BorrowFirst: horizontal overflow at 390px.** Repro: open `:5313/` at 390×844. `scrollWidth` is 501. `.header-right` (mode chip and Reset) is pushed past the viewport because nav, logo and chip share one row. Screenshot: `screenshots/overflow-borrow.png`. Fix: let the header wrap onto two rows on mobile. The inventory table already scrolls inside its own card.
-3. **BorrowFirst: contradictory totals after "Confirm and reserve".** Repro: Reset → mark M-204 owner-confirmed → Find (proposed $255, avoided $420) → Confirm and reserve. The plan is then recomputed against the inventory that was just reserved. Panel 2 switches to "New monitor purchase × 3", and panel 3 shows "All new purchase $675 / Proposed solution $675" directly above "Confirmed purchasing plan · $255.00" (`screenshots/borrow-sqlite-5-reserved.png`). A viewer at the 30-second mark sees $675 and $255 at the same time. Fix: after a successful reserve, freeze panels 2–3 on the confirmed plan until inputs change.
-4. **Budget Brawl: "Prevented over-budget requests" counts requests that are still pending.** Repro: Reset → Launch simultaneous requests. The banner reads "Prevented over-budget requests: 1 — $60", but Ben's card says "Pending approval; no funds held". `shared/engine.mjs` counts `awaiting_approval && !fundsHeld` and `awaiting_funds` as prevented. If budget is raised and Ben is approved, the request succeeds, so the count claims a prevention that may not hold. Fix: count only terminal `denied/insufficient_funds`, or relabel the line to "Blocked from reserving (pending funds)".
-5. **Root runner is not cross-platform** (`scripts/run-apps.mjs` on `codex/cart-tetris`). `spawnSync('npm', …)` returns `status: null` with ENOENT on Windows, and `r.status !== 0` then counts every app as failed. Fix: use `process.platform === 'win32' ? 'npm.cmd' : 'npm'` together with `shell: true` (needed on Node ≥ 20.12 for `.cmd`), and print `r.error` when it is set.
+## Fit at 1536×1024 (result above the fold)
 
-## Highest-value polish (not defects)
+- **Cart:** savings card bottom at about 650px; Approve/Export at about 880px. Fits.
+- **Pay:** verdict, ledger header and first ledger rows fit (ledger table header at y≈837).
+- **Borrow:** proposed solution, "Potential spending avoided" and Confirm all fit (Confirm bottom ≈645).
+- **Budget** (unrepaired head): totals, prevented line and agent cards fit.
+- **Exit:** does not fit (see P2-1).
 
-- **Cart:** with a 1-day deadline the result says "$0.00 less". Add a line explaining why, e.g. "Only QuickBox delivers in 1 day; splitting saves nothing". That is the trade-off the deadline is meant to teach.
-- **Pay:** sandbox ledger rows created now are stamped "Sep 3, 2024…". Mark this as a demo clock so it doesn't read as a bug. Put the "N duplicates blocked" stat at the top of the right panel; it is the 30-second takeaway.
-- **BorrowFirst:** the "Potential spending avoided $420" card is the key message. Keep it visible after reserving, in the confirmed state (see P2-3).
-- **Budget:** make the first view resemble the concept, e.g. a pulsing "▶ Launch simultaneous requests" call to action above the fold so viewers press it first.
-
-## ExitLane
-
-`codex/exitlane` was not on origin (checked with `git ls-remote`). Its review is still owed. The E01–E14 checks to run once it lands: E01 shows net $150, E02 refunds $150, the sample refundable total is 55000, the exact UTC cutoff displays correctly in America/Toronto across DST, negative net benefit stays visible, and duplicate execution and provider failure are idempotent.
+## Probe usage
+The scripts assume local servers on 5311–5315. Python probes drive system Chrome through Playwright. The `.mjs` probes need Node ≥ 22.
