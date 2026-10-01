@@ -28,6 +28,7 @@ export function planSignature(items: BasketItem[], deadlineDays: number, quoteSe
             .map((k) => {
               const q = v.quotes[k];
               return {
+                key: k,
                 skuId: q.skuId,
                 unitCents: q.unitCents,
                 stock: q.stock,

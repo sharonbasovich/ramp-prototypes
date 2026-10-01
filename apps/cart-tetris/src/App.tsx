@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BasketItem, QuoteSet, SolveResult, Vendor, VendorOrder } from './engine/types';
 import { solve, singleVendorBaseline } from './engine/optimize';
 import { planSignature } from './engine/signature';
+import { validateQuoteSet } from './engine/validate';
+import type { Approval } from './approval';
+import { isApprovalUsable, reduceApprovalOnSignature } from './approval';
 import { SEED_DEADLINE_DAYS, SEED_ITEMS, SEED_QUOTE_SET, SKU_CATALOG } from './data/seed';
 import type { PersistedState, StoreAdapter } from './store/adapter';
 import { MODE_LABEL } from './store/adapter';
@@ -18,10 +21,11 @@ interface Computed {
   baseline: { vendor: Vendor; order: VendorOrder } | null;
   sig: string;
   computedAt: string;
-  /** Items exactly as they were when this result was computed, so a stale
-   * plan never mixes old math with new labels. */
+  /** Inputs exactly as they were when this result was computed, so a stale
+   * plan never mixes old math with new labels or vendor identities. */
   items: BasketItem[];
   deadlineDays: number;
+  quoteSet: QuoteSet;
 }
 
 export default function App() {
@@ -29,7 +33,7 @@ export default function App() {
   const [items, setItems] = useState<BasketItem[]>(SEED_ITEMS);
   const [deadline, setDeadline] = useState<number>(SEED_DEADLINE_DAYS);
   const [quoteSet, setQuoteSet] = useState<QuoteSet>(SEED_QUOTE_SET);
-  const [approval, setApproval] = useState<{ signature: string; approvedAt: string } | null>(null);
+  const [approval, setApproval] = useState<Approval | null>(null);
   const [computed, setComputed] = useState<Computed | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -42,13 +46,24 @@ export default function App() {
   );
 
   const compute = useCallback((its: BasketItem[], dl: number, qs: QuoteSet) => {
+    // Revalidate quotes at compute time too — an expired or tampered set must
+    // never produce a solvable plan, regardless of how it arrived.
+    const quoteErrors = validateQuoteSet(qs).errors;
+    const result: SolveResult =
+      quoteErrors.length > 0
+        ? { status: 'infeasible', reasons: quoteErrors.map((e) => `quotes invalid: ${e}`) }
+        : solve({ items: its, deadlineDays: dl, quoteSet: qs });
     setComputed({
-      result: solve({ items: its, deadlineDays: dl, quoteSet: qs }),
-      baseline: singleVendorBaseline({ items: its, deadlineDays: dl, quoteSet: qs }),
+      result,
+      baseline:
+        result.status === 'optimal' && quoteErrors.length === 0
+          ? singleVendorBaseline({ items: its, deadlineDays: dl, quoteSet: qs })
+          : null,
       sig: planSignature(its, dl, qs),
       computedAt: new Date().toISOString(),
       items: its.map((i) => ({ ...i })),
       deadlineDays: dl,
+      quoteSet: structuredClone(qs),
     });
   }, []);
 
@@ -64,14 +79,22 @@ export default function App() {
       try {
         const saved = await adapter.load();
         if (saved && !cancelled) {
+          // A persisted quote set that no longer validates (e.g. expired while
+          // stored) is dropped back to the seed fixture rather than trusted.
+          const savedQs =
+            saved.quoteSet &&
+            Array.isArray(saved.quoteSet.vendors) &&
+            validateQuoteSet(saved.quoteSet).errors.length === 0
+              ? saved.quoteSet
+              : SEED_QUOTE_SET;
           if (Array.isArray(saved.items) && saved.items.length > 0) setItems(saved.items);
           if (Number.isInteger(saved.deadlineDays)) setDeadline(saved.deadlineDays);
-          if (saved.quoteSet && Array.isArray(saved.quoteSet.vendors)) setQuoteSet(saved.quoteSet);
+          setQuoteSet(savedQs);
           if (saved.approval && typeof saved.approval.signature === 'string') setApproval(saved.approval);
           compute(
             saved.items ?? SEED_ITEMS,
             saved.deadlineDays ?? SEED_DEADLINE_DAYS,
-            saved.quoteSet ?? SEED_QUOTE_SET,
+            savedQs,
           );
         } else {
           compute(SEED_ITEMS, SEED_DEADLINE_DAYS, SEED_QUOTE_SET);
@@ -87,6 +110,12 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // An approval is revoked — irreversibly — the moment the inputs stop
+  // matching its signature. Restoring the old values does not resurrect it.
+  useEffect(() => {
+    setApproval((a) => reduceApprovalOnSignature(a, currentSig));
+  }, [currentSig]);
+
   // Debounced persistence of sandbox state.
   useEffect(() => {
     if (!loaded || !store) return;
@@ -100,7 +129,7 @@ export default function App() {
 
   const dirty = computed === null || computed.sig !== currentSig;
   const approvalValid =
-    approval !== null && !dirty && approval.signature === currentSig && computed?.result.status === 'optimal';
+    isApprovalUsable(approval, currentSig) && !dirty && computed?.result.status === 'optimal';
 
   const runCompute = () => compute(items, deadline, quoteSet);
 
@@ -119,11 +148,17 @@ export default function App() {
   };
 
   const approvePlan = () => {
+    // Approval also revalidates: an expired/mutated quote set must never be
+    // approved even if a still-valid plan was computed earlier.
+    if (!computed || validateQuoteSet(computed.quoteSet).errors.length > 0) return;
     setApproval({ signature: currentSig, approvedAt: new Date().toISOString() });
   };
 
   const exportPlan = (format: 'json' | 'csv') => {
-    if (!approvalValid || computed?.result.status !== 'optimal') return;
+    // Export also revalidates: a quote set that expired between compute and
+    // export must not produce a plan document.
+    if (!approvalValid || computed?.result.status !== 'optimal' || !approval) return;
+    if (validateQuoteSet(computed.quoteSet).errors.length > 0) return;
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     if (format === 'json') {
       download(

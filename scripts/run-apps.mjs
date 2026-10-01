@@ -23,6 +23,22 @@ const PORTS = {
   exitlane: 5315,
 };
 
+// Cross-platform npm invocation: prefer running the npm CLI script under the
+// current Node binary (works everywhere, no .cmd shim needed); fall back to
+// the platform npm launcher when npm_execpath is not set (script invoked
+// outside an npm context).
+function npmLaunch(args) {
+  const cli = process.env.npm_execpath;
+  if (cli && cli.endsWith('.js') && existsSync(cli)) {
+    return { command: process.execPath, args: [cli, ...args], shell: false };
+  }
+  return {
+    command: process.platform === 'win32' ? 'npm.cmd' : 'npm',
+    args,
+    shell: process.platform === 'win32',
+  };
+}
+
 function apps() {
   if (!existsSync(APPS_DIR)) return [];
   return readdirSync(APPS_DIR, { withFileTypes: true })
@@ -55,13 +71,20 @@ function runSequential() {
   }
   let failed = 0;
   for (const slug of list) {
+    const launch = npmLaunch(npmCmd(slug));
     console.log(`\n=== ${slug}: npm ${npmCmd(slug).join(' ')} ===`);
-    const r = spawnSync('npm', npmCmd(slug), {
+    const r = spawnSync(launch.command, launch.args, {
       cwd: join(APPS_DIR, slug),
       stdio: 'inherit',
       env: process.env,
+      shell: launch.shell,
     });
-    if (r.status !== 0) failed++;
+    if (r.error) {
+      console.error(`${slug}: could not launch npm: ${r.error.message}`);
+      failed++;
+    } else if (r.status !== 0) {
+      failed++;
+    }
   }
   console.log(`\n${cmd}: ${list.length - failed}/${list.length} app(s) ok`);
   return failed === 0 ? 0 : 1;
@@ -73,18 +96,38 @@ function runStart() {
     console.log('no apps found under apps/*/ — run npm run setup after an app lands');
     process.exit(1);
   }
+  // Servers serve dist/, so build any app that has not been built yet —
+  // `npm run setup && npm start` must work on a fresh clone.
+  for (const slug of list) {
+    if (existsSync(join(APPS_DIR, slug, 'dist', 'index.html'))) continue;
+    console.log(`=== ${slug}: building dist (npm run build) ===`);
+    const launch = npmLaunch(['run', 'build']);
+    const r = spawnSync(launch.command, launch.args, {
+      cwd: join(APPS_DIR, slug),
+      stdio: 'inherit',
+      env: process.env,
+      shell: launch.shell,
+    });
+    if (r.error || r.status !== 0) {
+      console.error(`${slug}: build failed${r.error ? ` (${r.error.message})` : ''} — skipping`);
+      list.splice(list.indexOf(slug), 1);
+    }
+  }
+  if (list.length === 0) process.exit(1);
   console.log('starting sandbox servers (Ctrl+C stops all):');
   const kids = [];
   for (const slug of list) {
     const port = PORTS[slug] ?? '????';
     console.log(`  ${slug.padEnd(14)} http://localhost:${port}`);
-    kids.push(
-      spawn('npm', ['start'], {
-        cwd: join(APPS_DIR, slug),
-        stdio: ['ignore', 'inherit', 'inherit'],
-        env: { ...process.env, PORT: String(port) },
-      }),
-    );
+    const launch = npmLaunch(['start']);
+    const k = spawn(launch.command, launch.args, {
+      cwd: join(APPS_DIR, slug),
+      stdio: ['ignore', 'inherit', 'inherit'],
+      env: { ...process.env, PORT: String(port) },
+      shell: launch.shell,
+    });
+    k.on('error', (e) => console.error(`${slug}: cannot start npm: ${e.message}`));
+    kids.push(k);
   }
   const stop = () => kids.forEach((k) => k.kill('SIGTERM'));
   process.on('SIGINT', () => {
@@ -94,8 +137,6 @@ function runStart() {
   process.on('SIGTERM', stop);
 }
 
-const MIME = { '.html': 'text/html; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml' };
-
 function runHub() {
   const port = 5300;
   createServer(async (req, res) => {
@@ -103,6 +144,15 @@ function runHub() {
     if (url.pathname === '/' || url.pathname === '/index.html') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(await readFile(join(ROOT, 'hub', 'index.html'), 'utf8'));
+      return;
+    }
+    // Keep the hub's relative ./<slug>/ links working locally: on Pages they
+    // resolve to the deployed directory; here they redirect to the app's own
+    // sandbox server.
+    const slug = url.pathname.split('/').filter(Boolean)[0];
+    if (slug && PORTS[slug]) {
+      res.writeHead(302, { location: `http://localhost:${PORTS[slug]}/` });
+      res.end();
       return;
     }
     res.writeHead(404);

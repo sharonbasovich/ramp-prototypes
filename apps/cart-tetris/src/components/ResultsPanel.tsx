@@ -1,4 +1,5 @@
 import type { BasketItem, QuoteSet, SolveResult, Vendor, VendorOrder } from '../engine/types';
+import type { Approval } from '../approval';
 
 interface Computed {
   result: SolveResult;
@@ -7,6 +8,7 @@ interface Computed {
   computedAt: string;
   items: BasketItem[];
   deadlineDays: number;
+  quoteSet: QuoteSet;
 }
 
 interface Props {
@@ -14,7 +16,7 @@ interface Props {
   quoteSet: QuoteSet;
   computed: Computed | null;
   dirty: boolean;
-  approval: { signature: string; approvedAt: string } | null;
+  approval: Approval | null;
   approvalValid: boolean;
   onApprove(): void;
   onExport(format: 'json' | 'csv'): void;
@@ -40,12 +42,17 @@ export default function ResultsPanel({
   onApprove,
   onExport,
 }: Props) {
-  const vendors = quoteSet.vendors;
+  // Render a stale plan against the inputs it was computed with, not the
+  // current ones — a re-imported quote set can rename vendors entirely.
+  const vendors = (computed?.quoteSet ?? quoteSet).vendors;
   const shownItems = computed?.items ?? items;
   const positive = shownItems.filter((i) => i.qty > 0);
   const result = computed?.result ?? null;
   const plan = result?.status === 'optimal' ? result.plan : null;
   const baseline = computed?.baseline ?? null;
+  // A vendor order exists whenever units were allocated to it — even when
+  // those units cost $0.00 (a free SKU still ships and still hits minimums).
+  const usedVendors = new Set(plan?.allocations.map((a) => a.vendorId) ?? []);
 
   const allocOf = (skuId: string, vendorId: string): number => {
     if (!plan) return 0;
@@ -140,7 +147,7 @@ export default function ResultsPanel({
                   const color = vendorColor(vendors, v.id);
                   return (
                     <td key={v.id} className="cell">
-                      {order && order.itemsCents > 0 ? (
+                      {order && usedVendors.has(v.id) ? (
                         <span className={`chip money ${color}`}>{fmt(order.orderCents)}</span>
                       ) : (
                         <span>{fmt(0)}</span>
@@ -154,7 +161,7 @@ export default function ResultsPanel({
         )}
       </section>
 
-      <section className="card" style={{ marginTop: 22 }} aria-label="Cost comparison">
+      <section className="card" style={{ marginTop: 14 }} aria-label="Cost comparison">
         <h2>Cost comparison</h2>
         <p className="card-sub">
           Here's how the optimized plan compares to buying everything from a single vendor.
@@ -209,12 +216,12 @@ export default function ResultsPanel({
                   </thead>
                   <tbody>
                     {plan.orders
-                      .filter((o) => o.itemsCents > 0)
+                      .filter((o) => usedVendors.has(o.vendorId))
                       .map((o) => {
-                        const v = vendors.find((x) => x.id === o.vendorId)!;
+                        const v = vendors.find((x) => x.id === o.vendorId);
                         return (
                           <tr key={o.vendorId}>
-                            <td>{v.name}</td>
+                            <td>{v?.name ?? o.vendorId}</td>
                             <td>{itemsFor(o.vendorId)}</td>
                             <td className="num">{fmt(o.itemsCents)}</td>
                             <td className="num">

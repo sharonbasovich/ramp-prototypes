@@ -108,6 +108,39 @@ const seed = await evaluate(`JSON.stringify({
 console.log('seed state:', seed);
 await shot('desktop-seed');
 
+// geometry: concept targets — content at x≈42, cost card top ≈538, approve
+// row inside the 1024 viewport without scrolling
+const geom1536 = await evaluate(`JSON.stringify((() => {
+  const left = Math.round(document.querySelector('.grid .card').getBoundingClientRect().x);
+  const cost = Math.round(document.querySelector('[aria-label="Cost comparison"]').getBoundingClientRect().top);
+  const ra = document.querySelector('.result-actions').getBoundingClientRect();
+  return { contentLeft: left, costTop: cost, approveBottom: Math.round(ra.bottom), vh: window.innerHeight };
+})())`);
+console.log('geometry@1536:', geom1536);
+
+// --- regression: import brand-new vendor ids while a stale plan is shown ----
+// previously crashed ResultsPanel resolving old orders against new vendors.
+await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent.includes('Import quotes'))?.click()`);
+await sleep(400);
+await evaluate(`(() => {
+  const ta = document.querySelector('.modal textarea');
+  const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+  set.call(ta, ${JSON.stringify('{"currency":"USD","quotedAt":"2026-09-01","validUntil":"2027-06-01","vendors":[{"id":"newco","name":"New Co","deliveryDays":2,"shippingCents":300,"freeShipThresholdCents":null,"minOrderCents":null,"quotes":{"coffee":{"skuId":"coffee","unitCents":900,"stock":10},"cups":{"skuId":"cups","unitCents":300,"stock":10},"snack-bars":{"skuId":"snack-bars","unitCents":600,"stock":10}}}]}')});
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+})()`);
+await sleep(200);
+await evaluate(`[...document.querySelectorAll('.modal button')].find(b=>b.textContent.includes('Validate'))?.click()`);
+await sleep(600);
+const afterImport = await evaluate(`JSON.stringify({
+  allocRows: document.querySelectorAll('.alloc tbody tr').length,
+  stale: document.querySelector('.stale-note')?.textContent ?? null,
+  crashed: !document.querySelector('.page'),
+})`);
+console.log('after new-vendor import (stale plan kept):', afterImport);
+await shot('desktop-import-new-vendors');
+await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Reset demo')?.click()`);
+await sleep(800);
+
 // --- changed input: deadline 3 -> 1 day, recompute ----------------------
 await evaluate(`(() => {
   const sel = document.querySelector('#deadline');
@@ -151,10 +184,36 @@ const voided = await evaluate(`document.querySelector('.badge.warn')?.textConten
 console.log('after qty change:', voided);
 await shot('desktop-approval-voided');
 
+// --- regression: restore original inputs + recompute must NOT resurrect the
+// revoked approval ----------------------------------------------------------
+await evaluate(`[...document.querySelectorAll('.stepper button')].find(b=>b.getAttribute('aria-label')==='Decrease Coffee')?.click()`);
+await sleep(200);
+await evaluate(click('.list-actions .btn.primary'));
+await sleep(600);
+const resurrect = await evaluate(`JSON.stringify({
+  badge: document.querySelector('.result-actions .badge')?.textContent ?? null,
+  exportDisabled: [...document.querySelectorAll('button')].find(b=>b.textContent.includes('Export plan'))?.disabled,
+})`);
+console.log('after restoring inputs (approval must stay void):', resurrect);
+await shot('desktop-approval-still-void');
+await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Reset demo')?.click()`);
+await sleep(800);
+
 // --- quotes editor (editable inputs) --------------------------------------
 await evaluate(`document.querySelector('details.quotes')?.scrollIntoView({block:'start'})`);
 await sleep(400);
 await shot('desktop-quotes-editor');
+
+// --- 1366x768: savings + approve row must fit in the first viewport ---------
+await evaluate(`window.scrollTo(0,0)`);
+await setViewport(1366, 768);
+const geom1366 = await evaluate(`JSON.stringify((() => {
+  const ra = document.querySelector('.result-actions').getBoundingClientRect();
+  const cost = Math.round(document.querySelector('[aria-label="Cost comparison"]').getBoundingClientRect().top);
+  return { costTop: cost, approveBottom: Math.round(ra.bottom), approveVisible: ra.bottom <= window.innerHeight, vh: window.innerHeight };
+})())`);
+console.log('geometry@1366:', geom1366);
+await shot('desktop-1366');
 
 // --- mobile 390 (reset demo first so seed quantities are restored) ----------
 await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Reset demo')?.click()`);

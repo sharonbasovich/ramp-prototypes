@@ -12,7 +12,7 @@ export function oracleSolve(input: SolveInput): { plan: Plan; evaluated: number 
   const vendors = quoteSet.vendors;
   const positive = items.filter((it) => it.qty > 0);
   let evaluated = 0;
-  const found: { best: { key: string; plan: Plan } | null } = { best: null };
+  const found: { best: { total: number; vendorCount: number; plan: Plan } | null } = { best: null };
 
   interface Unit {
     skuIdx: number;
@@ -56,26 +56,32 @@ export function oracleSolve(input: SolveInput): { plan: Plan; evaluated: number 
       }
     });
     for (let v = 0; v < vendors.length; v++) {
-      if (vendors[v].deliveryDays > deadlineDays && counts.some((c) => c[v] > 0)) return;
+      const used = counts.some((c) => c[v] > 0);
+      if (vendors[v].deliveryDays > deadlineDays && used) return;
       const mo = vendors[v].minOrderCents;
-      if (subs[v] > 0 && mo != null && subs[v] < mo) return;
+      if (used && mo != null && subs[v] < mo) return;
     }
     const orders: VendorOrder[] = [];
     let shipping = 0;
     let vendorCount = 0;
     vendors.forEach((v, i) => {
-      const vo = vendorOrderCost(subs[i], v)!;
+      const used = counts.some((c) => c[i] > 0);
+      const vo = vendorOrderCost(subs[i], v, used)!;
       orders.push(vo);
-      if (vo.itemsCents > 0) {
+      if (used) {
         vendorCount++;
         shipping += vo.shippingCents;
       }
     });
     const itemsCents = subs.reduce((a, b) => a + b, 0);
     const total = itemsCents + shipping;
-    // Same deterministic ordering as the solver: total, vendor count.
-    const key = `${String(total).padStart(9, '0')}|${String(vendorCount).padStart(2, '0')}`;
-    if (found.best === null || key < found.best.key) {
+    if (!Number.isSafeInteger(total)) return;
+    // Same deterministic ordering as the solver: total, then vendor count.
+    if (
+      found.best === null ||
+      total < found.best.total ||
+      (total === found.best.total && vendorCount < found.best.vendorCount)
+    ) {
       const allocations = counts
         .flatMap((c, i) =>
           c
@@ -101,7 +107,8 @@ export function oracleSolve(input: SolveInput): { plan: Plan; evaluated: number 
           };
         });
       found.best = {
-        key,
+        total,
+        vendorCount,
         plan: {
           allocations,
           orders,

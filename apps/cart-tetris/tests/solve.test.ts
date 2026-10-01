@@ -162,7 +162,7 @@ describe('edge cases', () => {
         quotes: { widget: { skuId: 'widget', unitCents: 300, stock: 10 } },
       },
     ];
-    const quoteSet: QuoteSet = { currency: 'USD', quotedAt: '2026-01-01', validUntil: '2027-01-01', vendors };
+    const quoteSet: QuoteSet = { currency: 'USD', quotedAt: '2026-01-01', validUntil: '2099-01-01', vendors };
     const items: BasketItem[] = [{ skuId: 'widget', name: 'Widget', detail: 'x', qty: 2 }];
     const res = solve({ items, deadlineDays: 3, quoteSet });
     if (res.status !== 'optimal') throw new Error('expected optimal');
@@ -196,7 +196,7 @@ describe('edge cases', () => {
     const res = solve({
       items: [{ skuId: 'w', name: 'W', detail: 'x', qty: 4 }],
       deadlineDays: 3,
-      quoteSet: { currency: 'USD', quotedAt: '2026-01-01', validUntil: '2027-01-01', vendors },
+      quoteSet: { currency: 'USD', quotedAt: '2026-01-01', validUntil: '2099-01-01', vendors },
     });
     if (res.status !== 'optimal') throw new Error('expected optimal');
     expect(res.plan.totalCents).toBe(400 + 200); // 4×100 items + two shipping fees
@@ -227,7 +227,7 @@ describe('edge cases', () => {
     const res = solve({
       items: [{ skuId: 'w', name: 'W', detail: 'x', qty: 2 }],
       deadlineDays: 3,
-      quoteSet: { currency: 'USD', quotedAt: '2026-01-01', validUntil: '2027-01-01', vendors },
+      quoteSet: { currency: 'USD', quotedAt: '2026-01-01', validUntil: '2099-01-01', vendors },
     });
     if (res.status !== 'optimal') throw new Error('expected optimal');
     // MinOrder would be 200 (below 1000 min → disqualified); Normal = 400+500 = 900.

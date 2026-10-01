@@ -1,4 +1,5 @@
 import type { BasketItem, QuoteSet, SolveResult, Vendor, VendorOrder } from './engine/types';
+import type { Approval } from './approval';
 import { planSignature } from './engine/signature';
 
 interface Computed {
@@ -6,6 +7,12 @@ interface Computed {
   baseline: { vendor: Vendor; order: VendorOrder } | null;
   sig: string;
   computedAt: string;
+  quoteSet: QuoteSet;
+}
+
+function usedVendorIds(computed: Computed): Set<string> {
+  const plan = computed.result.status === 'optimal' ? computed.result.plan : null;
+  return new Set(plan?.allocations.map((a) => a.vendorId) ?? []);
 }
 
 interface ExportInput {
@@ -13,7 +20,7 @@ interface ExportInput {
   deadline: number;
   quoteSet: QuoteSet;
   computed: Computed;
-  approval: { signature: string; approvedAt: string };
+  approval: Approval;
 }
 
 const ASSUMPTIONS = [
@@ -40,7 +47,7 @@ export function buildExportJson({ items, deadline, quoteSet, computed, approval 
     plan: plan
       ? {
           orders: plan.orders
-            .filter((o) => o.itemsCents > 0)
+            .filter((o) => usedVendorIds(computed).has(o.vendorId))
             .map((o) => ({
               vendorId: o.vendorId,
               vendorName: quoteSet.vendors.find((v) => v.id === o.vendorId)?.name ?? o.vendorId,
@@ -82,22 +89,34 @@ export function buildExportJson({ items, deadline, quoteSet, computed, approval 
   };
 }
 
+/** RFC 4180 escaping: quote fields containing commas, quotes, or newlines. */
+function csvCell(value: string | number): string {
+  const s = String(value);
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
 export function buildExportCsv({ items, deadline, quoteSet, computed, approval }: ExportInput): string {
   const plan = computed.result.status === 'optimal' ? computed.result.plan : null;
+  const used = usedVendorIds(computed);
   const lines: string[] = [];
   lines.push('# Cart Tetris purchase plan — DEMO SANDBOX EXPORT, no real purchase');
   lines.push(`# exported_at,${new Date().toISOString()}`);
   lines.push(`# approved_at,${approval.approvedAt}`);
   lines.push(`# plan_signature,${planSignature(items, deadline, quoteSet)}`);
   lines.push(`# deadline_days,${deadline}`);
+  lines.push(`# currency,${quoteSet.currency}`);
+  lines.push(`# quotes_quoted_at,${quoteSet.quotedAt}`);
+  lines.push(`# quotes_valid_until,${quoteSet.validUntil}`);
   lines.push('vendor,sku,item,qty,unit_cents,line_cents,vendor_items_cents,vendor_shipping_cents,vendor_order_cents');
   if (plan) {
-    for (const o of plan.orders.filter((x) => x.itemsCents > 0)) {
+    for (const o of plan.orders.filter((x) => used.has(x.vendorId))) {
       const vname = quoteSet.vendors.find((v) => v.id === o.vendorId)?.name ?? o.vendorId;
       for (const a of plan.allocations.filter((x) => x.vendorId === o.vendorId)) {
         const name = items.find((i) => i.skuId === a.skuId)?.name ?? a.skuId;
         lines.push(
-          [vname, a.skuId, name, a.qty, a.unitCents, a.lineCents, o.itemsCents, o.shippingCents, o.orderCents].join(','),
+          [vname, a.skuId, name, a.qty, a.unitCents, a.lineCents, o.itemsCents, o.shippingCents, o.orderCents]
+            .map(csvCell)
+            .join(','),
         );
       }
     }
