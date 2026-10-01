@@ -1,0 +1,8 @@
+node_modules
+dist
+site/
+apps/*/node_modules
+apps/*/dist
+apps/*/*.sqlite
+*.local
+.DS_Store

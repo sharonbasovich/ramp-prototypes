@@ -1,0 +1,14 @@
+{
+  "name": "ramp-prototypes",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Five working time-and-money prototypes for a private Ramp event",
+  "scripts": {
+    "setup": "node scripts/run-apps.mjs ci",
+    "test": "node scripts/run-apps.mjs test",
+    "build": "node scripts/run-apps.mjs build",
+    "start": "node scripts/run-apps.mjs start",
+    "hub": "node scripts/run-apps.mjs hub"
+  }
+}

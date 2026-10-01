@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ramp prototype suite</title>
+    <style>
+      :root {
+        --ink: #0f172a;
+        --muted: #64748b;
+        --faint: #94a3b8;
+        --line: #e2e8f0;
+        --paper: #ffffff;
+        --wash: #f8fafc;
+        --blue: #2563eb;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: 'Manrope', 'Segoe UI', system-ui, -apple-system, sans-serif;
+        color: var(--ink);
+        background: var(--paper);
+      }
+      .page { max-width: 960px; margin: 0 auto; padding: 28px 24px 56px; }
+      .topbar { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 0 18px; border-bottom: 1px solid var(--line); }
+      .brand { font-weight: 800; font-size: 19px; letter-spacing: -0.01em; }
+      .tag { color: var(--faint); font-size: 12.5px; }
+      h1 { font-size: 34px; letter-spacing: -0.02em; margin: 30px 0 8px; }
+      .sub { color: var(--muted); margin: 0 0 30px; font-size: 15.5px; max-width: 640px; }
+      .grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+      a.card {
+        display: flex; align-items: center; gap: 18px;
+        border: 1px solid var(--line); border-radius: 14px; padding: 18px 22px;
+        text-decoration: none; color: inherit; background: var(--paper);
+      }
+      a.card:hover { border-color: var(--blue); }
+      a.card .name { font-weight: 800; font-size: 17px; }
+      a.card .desc { color: var(--muted); font-size: 13.5px; margin-top: 3px; }
+      a.card .port { margin-left: auto; color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+      a.card .go { color: var(--blue); font-weight: 700; font-size: 13px; }
+      .note { margin-top: 26px; color: var(--faint); font-size: 12.5px; line-height: 1.6; }
+      code { background: var(--wash); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="topbar">
+        <div class="brand">Ramp prototypes</div>
+        <div class="tag">private event · demo data only · no real transactions</div>
+      </div>
+      <h1>Five ways small decisions leak money.</h1>
+      <p class="sub">
+        Each prototype is a complete sandbox workflow — real engines, example
+        data, honest labels. On GitHub Pages every app runs entirely in your
+        browser ("Browser sandbox"); locally each app can also serve a SQLite
+        sandbox backend on its own port.
+      </p>
+      <div class="grid">
+        <a class="card" href="./cart-tetris/">
+          <div>
+            <div class="name">Cart Tetris</div>
+            <div class="desc">The cheapest sticker prices made the most expensive cart — exact vendor-split optimization vs. single-vendor baseline.</div>
+          </div>
+          <span class="port">localhost:5311</span><span class="go">Open →</span>
+        </a>
+        <a class="card" href="./pay-me-twice/">
+          <div>
+            <div class="name">Pay Me Twice</div>
+            <div class="desc">Duplicate-invoice detection and transactional payment sandbox.</div>
+          </div>
+          <span class="port">localhost:5312</span><span class="go">Open →</span>
+        </a>
+        <a class="card" href="./borrowfirst/">
+          <div>
+            <div class="name">BorrowFirst</div>
+            <div class="desc">Borrow before you buy — equipment reservation and compatibility checks.</div>
+          </div>
+          <span class="port">localhost:5313</span><span class="go">Open →</span>
+        </a>
+        <a class="card" href="./budget-brawl/">
+          <div>
+            <div class="name">Budget Brawl</div>
+            <div class="desc">Scripted agents negotiate over a shared budget with real reservations.</div>
+          </div>
+          <span class="port">localhost:5314</span><span class="go">Open →</span>
+        </a>
+        <a class="card" href="./exitlane/">
+          <div>
+            <div class="name">ExitLane</div>
+            <div class="desc">Find what you can still cancel before true policy cutoffs.</div>
+          </div>
+          <span class="port">localhost:5315</span><span class="go">Open →</span>
+        </a>
+      </div>
+      <p class="note">
+        Local run: <code>npm run setup</code> once, then <code>npm start</code>
+        (each app on its own port above) — or open this page on GitHub Pages at
+        <code>/ramp-prototypes/</code>. App links go live as each prototype lands.
+      </p>
+    </div>
+  </body>
+</html>

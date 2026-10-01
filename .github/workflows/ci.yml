@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.apps.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: apps
+        run: |
+          set -e
+          list=$(find apps -mindepth 1 -maxdepth 1 -type d -exec test -f '{}/package.json' ';' -printf '%f\n' 2>/dev/null | sort | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "apps=$list" >> "$GITHUB_OUTPUT"
+          echo "detected apps: $list"
+
+  app:
+    needs: discover
+    if: ${{ needs.discover.outputs.apps != '[]' }}
+    name: ${{ matrix.app }}
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.discover.outputs.apps) }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.14'
+          cache: npm
+          cache-dependency-path: apps/${{ matrix.app }}/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
+
+  suite:
+    # Final assembled verification: hard-requires all five apps. It runs only
+    # on the default branch so in-flight builder PRs are not blocked while
+    # sibling apps land in parallel.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require all five apps
+        run: |
+          missing=0
+          for slug in cart-tetris pay-me-twice borrowfirst budget-brawl exitlane; do
+            if [ ! -f "apps/$slug/package.json" ]; then
+              echo "::error::missing app: apps/$slug"
+              missing=1
+            fi
+          done
+          exit $missing
