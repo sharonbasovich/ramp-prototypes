@@ -7,7 +7,7 @@ This is a review-only branch. No app code was changed and no builder fixes are d
 | Cart Tetris (+ root runner) | `codex/cart-tetris` PR1 | `1090a66` | **`b09cc5a`** | 5311 |
 | Budget Brawl | `codex/budget-brawl` PR2 | `32468be` | `32468be` (no repaired head pushed yet) | 5314 |
 | BorrowFirst | `codex/borrowfirst` PR3 | `e2942ab` | **`ef0ad26`** | 5313 |
-| Pay Me Twice | `codex/pay-me-twice` PR4 | `2ef72e2` | **`2872c2e`** | 5312 |
+| Pay Me Twice | `codex/pay-me-twice` PR4 | `2ef72e2` | **`a0b08c7`** | 5312 |
 | ExitLane | `codex/exitlane` | — | **`31bc5d0`** | 5315 |
 
 ## Checks (Node 22.14.0, Linux)
@@ -15,7 +15,7 @@ This is a review-only branch. No app code was changed and no builder fixes are d
 | App | npm ci | test | typecheck | build | /api/health |
 |---|---|---|---|---|---|
 | Cart `b09cc5a` | ok | 46/46, plus my 2-test independent oracle = 48/48 | ok | ok | sqlite |
-| Pay `2872c2e` | ok | 36/36 | ok | ok | sqlite |
+| Pay `a0b08c7` | ok | 41/41 | ok | ok | sqlite |
 | Borrow `ef0ad26` | ok | 43/43 | ok | ok | sqlite |
 | Budget `32468be` | ok | 21/21 | ok | ok | sqlite |
 | Exit `31bc5d0` | ok | 32/32 (`node --test`) | ok | ok | sqlite |
@@ -55,7 +55,7 @@ Static builds fall back to the "Browser sandbox" label; the console shows the ex
 4. **Root runner: `runStart` removes items from `list` while iterating it.** In `scripts/run-apps.mjs`, `list.splice(list.indexOf(slug), 1)` inside `for (const slug of list)` makes the next app skip its dist check. If app A fails to build, app B is started without a build. I reproduced the skip semantics in Node. Fix: iterate over a copy, or filter after the loop.
 
 **P3**
-- **Pay:** the API accepts any 3-letter currency. `POST /api/pay` with `currency:"XXX"` returns `recorded`. The UI offers only USD/EUR/GBP. Restrict the allowlist on the server.
+- **Pay** (still present at `a0b08c7`): a missing currency is now rejected, but the API still accepts any 3-letter code — `POST /api/pay` with `currency:"XXX"` returns `recorded`. The UI offers only USD/EUR/GBP. Restrict the allowlist on the server.
 - **Pay:** the billing-period date input is truncated at 1536 ("September 2⌷") next to "Not stated".
 - **Cart:** with a 1-day deadline the result reads "$0.00 less" with no explanation. Add "Only QuickBox delivers in 1 day".
 
