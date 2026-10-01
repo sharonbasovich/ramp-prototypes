@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const APP = fileURLToPath(new URL('..', import.meta.url));
@@ -35,6 +35,7 @@ const SEED = {
 let child;
 let tmpDir;
 let rid = 0;
+let epoch;
 const ridOf = (p) => `${p}-${++rid}`;
 
 async function api(path, body, method = body === undefined ? 'GET' : 'POST') {
@@ -55,17 +56,18 @@ async function state() {
 }
 
 async function place(body) {
-  return api('/api/requests', body);
+  return api('/api/requests', { epoch, ...body });
 }
 
-async function act(id, action) {
-  return api(`/api/requests/${encodeURIComponent(id)}/${action}`, {});
+async function act(id, action, commandEpoch = epoch) {
+  return api(`/api/requests/${encodeURIComponent(id)}/${action}`, { epoch: commandEpoch });
 }
 
 async function resetToTestSeed() {
   const { status, json } = await api('/api/reset', { config: SEED });
   assert.equal(status, 200);
   assert.equal(json.ok, true);
+  epoch = json.result.epoch;
 }
 
 async function waitForServer() {
@@ -95,9 +97,20 @@ before(async () => {
   await waitForServer();
 });
 
-after(() => {
-  child?.kill('SIGTERM');
-  rmSync(tmpDir, { recursive: true, force: true });
+after(async () => {
+  if (child && child.exitCode === null && child.signalCode === null) {
+    await new Promise((done, reject) => {
+      const timeout = setTimeout(() => reject(new Error('test server did not close')), 5000);
+      child.once('close', () => { clearTimeout(timeout); done(); });
+      child.kill('SIGTERM');
+    });
+  }
+  if (tmpDir) {
+    const target = resolve(tmpDir);
+    assert.equal(dirname(target), resolve(tmpdir()), 'cleanup must stay inside the test-owned temp directory');
+    assert.ok(basename(target).startsWith('bb-test-'));
+    rmSync(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
 });
 
 test('competing reservations: 20 parallel $60 requests on a $90 wallet -> exactly one holds funds', async () => {
@@ -337,4 +350,92 @@ test('invariant holds across mixed concurrent storm', async () => {
   );
   assert.ok(s.invariant.holds);
   assert.ok(s.totals.availableMinor >= 0);
+});
+
+
+test('expired holds cannot deny a new HTTP request when no GET occurred', async () => {
+  await resetToTestSeed();
+  await api('/api/config', { approvalThresholdMinor: 9000, quoteTtlMs: 500 });
+  const old = await place({ requestId: 'old-hold', agentId: 'agt-a', itemId: 'widget', qty: 1 });
+  assert.equal(old.json.result.status, 'reserved');
+  await new Promise(r => setTimeout(r, 650));
+  const next = await place({ requestId: 'new-hold', agentId: 'agt-b', itemId: 'widget', qty: 1 });
+  assert.equal(next.json.result.status, 'reserved');
+  const s = await state();
+  assert.equal(s.requests.find(r => r.requestId === 'old-hold').status, 'expired');
+  assert.equal(s.totals.reservedMinor, 6000);
+  assert.equal(s.totals.availableMinor, 3000);
+});
+
+test('HTTP approval and config sweep unrelated expired holds inside their mutation', async () => {
+  await resetToTestSeed();
+  await api('/api/config', { approvalThresholdMinor: 9000, quoteTtlMs: 500 });
+  await place({ requestId: 'expired-other', agentId: 'agt-a', itemId: 'widget', qty: 1 });
+  await api('/api/config', { approvalThresholdMinor: 4000, quoteTtlMs: 120000 });
+  await place({ requestId: 'pending-other', agentId: 'agt-b', itemId: 'lux', qty: 1 });
+  await new Promise(r => setTimeout(r, 650));
+  const approved = await act('pending-other', 'approve');
+  assert.equal(approved.json.result.status, 'reserved');
+  assert.equal(approved.json.result.totals.reservedMinor, 8000);
+  await resetToTestSeed();
+  await api('/api/config', { approvalThresholdMinor: 9000, quoteTtlMs: 500 });
+  await place({ requestId: 'expires-for-config', agentId: 'agt-a', itemId: 'widget', qty: 1 });
+  await new Promise(r => setTimeout(r, 650));
+  const config = await api('/api/config', { budgetMinor: 5000 });
+  assert.equal(config.status, 200);
+  assert.equal(config.json.result.totals.reservedMinor, 0);
+});
+
+test('HTTP config rejects unsafe money and leaves persisted wallet unchanged', async () => {
+  await resetToTestSeed();
+  for (const field of ['budgetMinor', 'approvalThresholdMinor']) {
+    for (const value of [1e30, Number.MAX_SAFE_INTEGER + 1, 100000001, 0.5, -1]) {
+      const r = await api('/api/config', { [field]: value });
+      assert.equal(r.status, 400, `${field}=${value} should fail`);
+      assert.equal(r.json.ok, false);
+    }
+  }
+  assert.equal((await state()).totals.budgetMinor, 9000);
+});
+
+test('HTTP old epoch cannot replay or act on a reused request ID after reset', async () => {
+  await resetToTestSeed();
+  const oldEpoch = epoch;
+  const input = { requestId: 'reused-id', agentId: 'agt-a', itemId: 'widget', qty: 1 };
+  await place(input);
+  await resetToTestSeed();
+  const fresh = await place(input);
+  assert.equal(fresh.json.result.epoch, epoch);
+  for (const action of ['approve', 'reject', 'commit', 'cancel']) {
+    const stale = await act(input.requestId, action, oldEpoch);
+    assert.equal(stale.status, 409);
+    assert.equal(stale.json.error.code, 'stale_epoch');
+    const missing = await api(`/api/requests/${input.requestId}/${action}`, {});
+    assert.equal(missing.status, 400);
+    assert.equal(missing.json.error.code, 'epoch_required');
+  }
+  const replay = await place({ ...input, epoch: oldEpoch });
+  assert.equal(replay.status, 409);
+  const missing = await api('/api/requests', input);
+  assert.equal(missing.status, 400);
+  const s = await state();
+  assert.equal(s.requests.length, 1);
+  assert.equal(s.requests[0].status, 'awaiting_approval');
+  assert.equal(s.totals.availableMinor, 3000);
+  assert.equal((await act(input.requestId, 'approve')).json.result.status, 'reserved');
+});
+
+test('HTTP impact separates denied budget requests from pending outcomes', async () => {
+  await resetToTestSeed();
+  await api('/api/config', { approvalThresholdMinor: 9000 });
+  await place({ requestId: 'budget-winner', agentId: 'agt-a', itemId: 'widget', qty: 1 });
+  await place({ requestId: 'budget-denied', agentId: 'agt-b', itemId: 'widget', qty: 1 });
+  await api('/api/config', { approvalThresholdMinor: 4000 });
+  await place({ requestId: 'budget-pending', agentId: 'agt-b', itemId: 'lux', qty: 1 });
+  await act('budget-pending', 'approve');
+  const s = await state();
+  assert.equal(s.impact.preventedCount, 1);
+  assert.equal(s.impact.preventedAmountMinor, 6000);
+  assert.equal(s.impact.pendingCount, 1);
+  assert.equal(s.impact.pendingAmountMinor, 8000);
 });

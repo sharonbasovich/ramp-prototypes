@@ -15,7 +15,13 @@ interface LockManagerLite {
   request(name: string, cb: () => unknown): Promise<unknown>;
 }
 
-function createBrowserBackend(): BackendApi {
+function response<T>(op: { ok: boolean; result?: T; code?: string; detail?: string }): OpResponse<T> {
+  return op.ok
+    ? { ok: true, result: op.result as T }
+    : { ok: false, error: { code: op.code ?? 'operation_failed', detail: op.detail ?? 'Operation failed.' } };
+}
+
+export function createBrowserBackend(): BackendApi {
   const store = createMemStore();
   try {
     const raw = localStorage.getItem(LS_KEY);
@@ -64,17 +70,17 @@ function createBrowserBackend(): BackendApi {
       });
     },
     configure(cfg) {
-      return run(() => engine.configure(store, cfg));
+      return run(() => response(engine.configure(store, cfg)));
     },
     setCatalogPrice(itemId, priceMinor) {
-      return run(() => engine.setCatalogPrice(store, itemId, priceMinor));
+      return run(() => response(engine.setCatalogPrice(store, itemId, priceMinor)));
     },
     placeRequest(req) {
       return run(
-        () => engine.placeRequest(store, req, Date.now()),
-      ) as Promise<OpResponse<RequestResult>>;
+        () => response<RequestResult>(engine.placeRequest(store, req, Date.now())),
+      );
     },
-    act(requestId, action) {
+    act(requestId, action, epoch) {
       return run(() => {
         const op =
           action === 'approve'
@@ -84,8 +90,8 @@ function createBrowserBackend(): BackendApi {
               : action === 'commit'
                 ? engine.commitRequest
                 : engine.cancelRequest;
-        return op(store, requestId, Date.now());
-      }) as Promise<OpResponse<RequestResult>>;
+        return response<RequestResult>(op(store, requestId, Date.now(), epoch));
+      });
     },
   };
 }

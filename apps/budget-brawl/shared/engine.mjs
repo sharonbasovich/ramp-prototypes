@@ -21,7 +21,6 @@
 // Terminal states are idempotent: replaying an op returns the stored result.
 
 export const TERMINAL_STATUSES = new Set(['committed', 'cancelled', 'denied', 'expired']);
-const ACTIVE_HOLD_STATUSES = new Set(['reserved', 'awaiting_approval']);
 const MAX_AMOUNT_MINOR = 1_000_000_00;
 
 function ok(result) {
@@ -30,6 +29,22 @@ function ok(result) {
 
 function fail(status, code, detail) {
   return { ok: false, status, code, detail };
+}
+
+// The epoch belongs to the command, not to a freshly read wallet. A delayed
+// command from before Reset must never affect a new request with the same ID.
+function checkEpoch(store, epoch) {
+  if (!Number.isSafeInteger(epoch) || epoch < 1) {
+    return fail(400, 'epoch_required', 'Include the wallet epoch from the request or snapshot.');
+  }
+  if (epoch !== store.epoch()) {
+    return fail(409, 'stale_epoch', 'This command belongs to a previous sandbox. Refresh and create a new request.');
+  }
+  return null;
+}
+
+function validMoney(value) {
+  return Number.isSafeInteger(value) && value >= 0 && value <= MAX_AMOUNT_MINOR;
 }
 
 function cents(minor) {
@@ -61,6 +76,7 @@ function itemName(store, req) {
 export function resultFor(store, req, replayed) {
   const w = store.getWallet();
   return {
+    epoch: store.epoch(),
     requestId: req.requestId,
     agentId: req.agentId,
     itemId: req.itemId,
@@ -111,6 +127,9 @@ function release(store, req) {
  */
 export function placeRequest(store, input, now) {
   return store.transact(() => {
+    const epochError = checkEpoch(store, input?.epoch);
+    if (epochError) return epochError;
+    sweepExpired(store, now);
     const requestId = String(input?.requestId ?? '').trim();
     if (requestId && requestId.length <= 80) {
       const prior = store.getRequest(requestId);
@@ -131,8 +150,8 @@ export function placeRequest(store, input, now) {
     }
     const claimedPriceMinor = input?.claimedPriceMinor;
     if (claimedPriceMinor !== undefined && claimedPriceMinor !== null) {
-      if (!Number.isInteger(claimedPriceMinor) || claimedPriceMinor < 0) {
-        return fail(400, 'invalid_price', 'claimedPriceMinor must be a non-negative integer');
+      if (!validMoney(claimedPriceMinor)) {
+        return fail(400, 'invalid_price', `claimedPriceMinor must be integer cents from 0 to ${MAX_AMOUNT_MINOR}`);
       }
     }
     const wallet = store.getWallet();
@@ -217,8 +236,11 @@ function expireIfStale(store, req, now) {
   return null;
 }
 
-export function approveRequest(store, requestId, now) {
+export function approveRequest(store, requestId, now, epoch) {
   return store.transact(() => {
+    const epochError = checkEpoch(store, epoch);
+    if (epochError) return epochError;
+    sweepExpired(store, now);
     let req = store.getRequest(requestId);
     if (!req) return fail(404, 'not_found', `no request '${requestId}'`);
     if (TERMINAL_STATUSES.has(req.status)) return ok(resultFor(store, req, true));
@@ -249,8 +271,10 @@ export function approveRequest(store, requestId, now) {
   });
 }
 
-export function rejectRequest(store, requestId, now) {
+export function rejectRequest(store, requestId, now, epoch) {
   return store.transact(() => {
+    const epochError = checkEpoch(store, epoch);
+    if (epochError) return epochError;
     let req = store.getRequest(requestId);
     if (!req) return fail(404, 'not_found', `no request '${requestId}'`);
     if (TERMINAL_STATUSES.has(req.status)) return ok(resultFor(store, req, true));
@@ -266,8 +290,10 @@ export function rejectRequest(store, requestId, now) {
   });
 }
 
-export function commitRequest(store, requestId, now) {
+export function commitRequest(store, requestId, now, epoch) {
   return store.transact(() => {
+    const epochError = checkEpoch(store, epoch);
+    if (epochError) return epochError;
     let req = store.getRequest(requestId);
     if (!req) return fail(404, 'not_found', `no request '${requestId}'`);
     if (req.status === 'committed') return ok(resultFor(store, req, true));
@@ -301,8 +327,10 @@ export function commitRequest(store, requestId, now) {
   });
 }
 
-export function cancelRequest(store, requestId, now) {
+export function cancelRequest(store, requestId, now, epoch) {
   return store.transact(() => {
+    const epochError = checkEpoch(store, epoch);
+    if (epochError) return epochError;
     let req = store.getRequest(requestId);
     if (!req) return fail(404, 'not_found', `no request '${requestId}'`);
     if (req.status === 'cancelled') return ok(resultFor(store, req, true));
@@ -323,7 +351,7 @@ export function cancelRequest(store, requestId, now) {
 
 /**
  * Lazily expire non-terminal requests whose quote has lapsed. Runs inside a
- * transaction on every state read so balances stay conserved.
+ * transaction on state reads and before decisions that consume capacity.
  */
 export function sweepExpired(store, now) {
   return store.transact(() => {
@@ -338,19 +366,19 @@ export function sweepExpired(store, now) {
   });
 }
 
-export function configure(store, cfg) {
+export function configure(store, cfg, now = Date.now()) {
   return store.transact(() => {
     const w = store.getWallet();
     const next = { ...w };
     if (cfg?.budgetMinor !== undefined) {
-      if (!Number.isInteger(cfg.budgetMinor) || cfg.budgetMinor < 0) {
-        return fail(400, 'invalid_budget', 'budgetMinor must be a non-negative integer');
+      if (!validMoney(cfg.budgetMinor)) {
+        return fail(400, 'invalid_budget', `budgetMinor must be integer cents from 0 to ${MAX_AMOUNT_MINOR}`);
       }
       next.budgetMinor = cfg.budgetMinor;
     }
     if (cfg?.approvalThresholdMinor !== undefined) {
-      if (!Number.isInteger(cfg.approvalThresholdMinor) || cfg.approvalThresholdMinor < 0) {
-        return fail(400, 'invalid_threshold', 'approvalThresholdMinor must be a non-negative integer');
+      if (!validMoney(cfg.approvalThresholdMinor)) {
+        return fail(400, 'invalid_threshold', `approvalThresholdMinor must be integer cents from 0 to ${MAX_AMOUNT_MINOR}`);
       }
       next.approvalThresholdMinor = cfg.approvalThresholdMinor;
     }
@@ -360,6 +388,7 @@ export function configure(store, cfg) {
       }
       next.quoteTtlMs = cfg.quoteTtlMs;
     }
+    sweepExpired(store, now);
     const t = totals(store);
     const committed = t.spentMinor + t.reservedMinor;
     if (next.budgetMinor < committed) {
@@ -378,8 +407,8 @@ export function configure(store, cfg) {
 
 export function setCatalogPrice(store, itemId, priceMinor) {
   return store.transact(() => {
-    if (!Number.isInteger(priceMinor) || priceMinor < 0 || priceMinor > MAX_AMOUNT_MINOR) {
-      return fail(400, 'invalid_price', 'priceMinor must be a non-negative integer');
+    if (!validMoney(priceMinor)) {
+      return fail(400, 'invalid_price', `priceMinor must be integer cents from 0 to ${MAX_AMOUNT_MINOR}`);
     }
     const item = store.getItem(itemId);
     if (!item) return fail(404, 'unknown_item', `unknown catalog item '${itemId}'`);
@@ -402,12 +431,8 @@ export function snapshot(store) {
   const purchases = store.listPurchases();
   const events = store.listEvents();
   const t = totals(store);
-  const prevented = requests.filter(
-    (r) =>
-      (r.status === 'denied' && r.reason === 'insufficient_funds') ||
-      (r.status === 'awaiting_approval' && !r.fundsHeld) ||
-      r.status === 'awaiting_funds'
-  );
+  const prevented = requests.filter((r) => r.status === 'denied' && r.reason === 'insufficient_funds');
+  const pending = requests.filter((r) => r.status === 'awaiting_approval' || r.status === 'awaiting_funds');
   return {
     epoch: store.epoch(),
     wallet: {
@@ -426,6 +451,7 @@ export function snapshot(store) {
       permissions: store.listPermissions(a.agentId),
     })),
     requests: requests.map((r) => ({
+      epoch: store.epoch(),
       requestId: r.requestId,
       agentId: r.agentId,
       itemId: r.itemId,
@@ -446,7 +472,9 @@ export function snapshot(store) {
     impact: {
       preventedCount: prevented.length,
       preventedAmountMinor: prevented.reduce((s, r) => s + r.amountMinor, 0),
-      note: 'Requests blocked from reserving over budget. Sample amounts — not realized savings.',
+      pendingCount: pending.length,
+      pendingAmountMinor: pending.reduce((s, r) => s + r.amountMinor, 0),
+      note: 'Pending requests may still be approved. Sample amounts are not realized savings.',
     },
   };
 }
