@@ -386,11 +386,16 @@ export function singleVendorBaseline(input: SolveInput): { vendor: Vendor; order
         ok = false;
         break;
       }
-      itemsCents += it.qty * unitPriceForQty(q, it.qty);
+      const lineCents = it.qty * unitPriceForQty(q, it.qty);
+      if (!Number.isSafeInteger(lineCents) || !Number.isSafeInteger(itemsCents + lineCents)) {
+        ok = false;
+        break;
+      }
+      itemsCents += lineCents;
     }
     if (!ok) continue;
     const order = vendorOrderCost(itemsCents, v, true);
-    if (!order) continue;
+    if (!order || !Number.isSafeInteger(order.orderCents)) continue;
     if (!best || order.orderCents < best.order.orderCents) best = { vendor: v, order };
   }
   return best;

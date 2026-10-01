@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { solve } from '../src/engine/optimize';
+import { singleVendorBaseline, solve } from '../src/engine/optimize';
 import { parseCsvQuoteSet, validateQuoteSet, CSV_TEMPLATE } from '../src/engine/validate';
 import { isApprovalUsable, reduceApprovalOnSignature } from '../src/approval';
 import { buildExportCsv } from '../src/export';
@@ -113,6 +113,37 @@ describe('numeric cost comparison', () => {
     if (res.status !== 'optimal') throw new Error('expected optimal');
     expect(res.plan.totalCents).toBe(400);
     expect(res.plan.allocations.every((a) => a.vendorId === 'sane')).toBe(true);
+  });
+});
+
+describe('baseline safe integer arithmetic', () => {
+  it('refuses an unsafe single-vendor total while retaining a safe split optimum', () => {
+    const vendors: Vendor[] = [
+      {
+        id: 'large', name: 'Large', deliveryDays: 1, shippingCents: 0,
+        freeShipThresholdCents: null, minOrderCents: null,
+        quotes: { w: { skuId: 'w', unitCents: 3_500_000_000_000_001, stock: 3 } },
+      },
+      {
+        id: 'small', name: 'Small', deliveryDays: 1, shippingCents: 0,
+        freeShipThresholdCents: null, minOrderCents: null,
+        quotes: { w: { skuId: 'w', unitCents: 100, stock: 2 } },
+      },
+    ];
+    const input = { items: [item('w', 3)], deadlineDays: 3, quoteSet: mkSet(vendors) };
+    const result = solve(input);
+    if (result.status !== 'optimal') throw new Error('expected safe split optimum');
+    expect(result.plan.totalCents).toBe(3_500_000_000_000_201);
+    expect(singleVendorBaseline(input)).toBeNull();
+  });
+
+  it('refuses shipping that pushes a safe item subtotal beyond supported precision', () => {
+    const quoteSet = mkSet([{
+      id: 'large', name: 'Large', deliveryDays: 1, shippingCents: 1,
+      freeShipThresholdCents: null, minOrderCents: null,
+      quotes: { w: { skuId: 'w', unitCents: Number.MAX_SAFE_INTEGER, stock: 1 } },
+    }]);
+    expect(singleVendorBaseline({ items: [item('w', 1)], deadlineDays: 3, quoteSet })).toBeNull();
   });
 });
 
