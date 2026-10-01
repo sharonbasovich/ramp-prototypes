@@ -25,7 +25,16 @@ export function validateQuoteSet(raw: unknown, now: Date = new Date()): { quoteS
     return { errors };
   }
 
+  const seenIds = new Set<string>();
   qs.vendors.forEach((v, i) => {
+    if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+      errors.push(`vendor #${i + 1}: not an object`);
+      return;
+    }
+    if (typeof v.id === 'string' && v.id) {
+      if (seenIds.has(v.id)) errors.push(`duplicate vendor id "${v.id}"`);
+      seenIds.add(v.id);
+    }
     errors.push(...validateVendor(v, i));
   });
 
@@ -37,16 +46,16 @@ function validateVendor(v: Vendor, i: number): string[] {
   const label = v && typeof v.name === 'string' && v.name ? v.name : `vendor #${i + 1}`;
   if (typeof v.id !== 'string' || !v.id) errors.push(`${label}: missing id`);
   if (typeof v.name !== 'string' || !v.name) errors.push(`vendor #${i + 1}: missing name`);
-  if (!Number.isInteger(v.deliveryDays) || v.deliveryDays < 0) {
+  if (!Number.isSafeInteger(v.deliveryDays) || v.deliveryDays < 0) {
     errors.push(`${label}: deliveryDays must be a whole number >= 0`);
   }
-  if (!Number.isInteger(v.shippingCents) || v.shippingCents < 0) {
+  if (!Number.isSafeInteger(v.shippingCents) || v.shippingCents < 0) {
     errors.push(`${label}: shippingCents must be integer cents >= 0`);
   }
-  if (v.freeShipThresholdCents != null && (!Number.isInteger(v.freeShipThresholdCents) || v.freeShipThresholdCents < 0)) {
+  if (v.freeShipThresholdCents != null && (!Number.isSafeInteger(v.freeShipThresholdCents) || v.freeShipThresholdCents < 0)) {
     errors.push(`${label}: freeShipThresholdCents must be integer cents >= 0 or null`);
   }
-  if (v.minOrderCents != null && (!Number.isInteger(v.minOrderCents) || v.minOrderCents < 0)) {
+  if (v.minOrderCents != null && (!Number.isSafeInteger(v.minOrderCents) || v.minOrderCents < 0)) {
     errors.push(`${label}: minOrderCents must be integer cents >= 0 or null`);
   }
   if (typeof v.quotes !== 'object' || v.quotes === null || Array.isArray(v.quotes)) {
@@ -54,6 +63,10 @@ function validateVendor(v: Vendor, i: number): string[] {
     return errors;
   }
   for (const [skuId, q] of Object.entries(v.quotes)) {
+    if (!skuId) {
+      errors.push(`${label}: empty SKU key`);
+      continue;
+    }
     errors.push(...validateQuote(label, skuId, q));
   }
   return errors;
@@ -65,10 +78,13 @@ function validateQuote(label: string, skuId: string, q: VendorSkuQuote): string[
     errors.push(`${label} / ${skuId}: quote is not an object`);
     return errors;
   }
-  if (!Number.isInteger(q.unitCents) || q.unitCents < 0) {
+  if (q.skuId !== skuId) {
+    errors.push(`${label} / ${skuId}: quote key does not match skuId ${JSON.stringify(q.skuId)}`);
+  }
+  if (!Number.isSafeInteger(q.unitCents) || q.unitCents < 0) {
     errors.push(`${label} / ${skuId}: unitCents must be integer cents >= 0`);
   }
-  if (!Number.isInteger(q.stock) || q.stock < 0) {
+  if (!Number.isSafeInteger(q.stock) || q.stock < 0) {
     errors.push(`${label} / ${skuId}: stock must be a whole number >= 0`);
   }
   if (q.tiers != null) {
@@ -76,10 +92,10 @@ function validateQuote(label: string, skuId: string, q: VendorSkuQuote): string[
       errors.push(`${label} / ${skuId}: tiers must be an array`);
     } else {
       q.tiers.forEach((t, j) => {
-        if (!Number.isInteger(t.minQty) || t.minQty <= 0) {
+        if (!Number.isSafeInteger(t.minQty) || t.minQty <= 0) {
           errors.push(`${label} / ${skuId} tier ${j + 1}: minQty must be a whole number > 0`);
         }
-        if (!Number.isInteger(t.unitCents) || t.unitCents < 0) {
+        if (!Number.isSafeInteger(t.unitCents) || t.unitCents < 0) {
           errors.push(`${label} / ${skuId} tier ${j + 1}: unitCents must be integer cents >= 0`);
         }
       });
@@ -88,8 +104,22 @@ function validateQuote(label: string, skuId: string, q: VendorSkuQuote): string[
   return errors;
 }
 
-/** Minimal CSV: one row per vendor×SKU quote, plus a vendor header row. */
-export function parseCsvQuoteSet(text: string): { quoteSet?: QuoteSet; errors: string[] } {
+/** Whole-number only — no decimals, exponents, units, or trailing text. */
+function strictInt(raw: string): number | null {
+  const s = raw.trim();
+  if (!/^-?\d+$/.test(s)) return null;
+  const n = Number(s);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
+/**
+ * Minimal CSV: one row per vendor×SKU quote, plus a vendor header row.
+ * Strict: numeric cells must be bare integer digits; vendor-level fields
+ * (delivery, shipping, thresholds, minimum) and file-level fields (currency,
+ * valid_until) must agree on every row of a vendor / every row of the file —
+ * conflicting repeats are rejected, never last-row-wins.
+ */
+export function parseCsvQuoteSet(text: string, now: Date = new Date()): { quoteSet?: QuoteSet; errors: string[] } {
   const errors: string[] = [];
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
   if (lines.length < 2) return { errors: ['CSV needs a header and at least one data row'] };
@@ -101,8 +131,27 @@ export function parseCsvQuoteSet(text: string): { quoteSet?: QuoteSet; errors: s
   if (errors.length > 0) return { errors };
   const col = (row: string[], name: string) => row[header.indexOf(name)]?.trim() ?? '';
 
+  const reqInt = (row: string[], name: string, label: string): number => {
+    const n = strictInt(col(row, name));
+    if (n === null) {
+      errors.push(`${label}: ${name} must be a whole number (got "${col(row, name)}")`);
+      return Number.NaN;
+    }
+    return n;
+  };
+  const optInt = (row: string[], name: string, label: string): number | null => {
+    const raw = col(row, name);
+    if (!raw) return null;
+    const n = strictInt(raw);
+    if (n === null) errors.push(`${label}: ${name} must be a whole number (got "${raw}")`);
+    return n;
+  };
+  // Field names that must agree across repeated rows of one vendor.
+  const VENDOR_FIELDS = ['delivery_days', 'shipping_cents', 'free_threshold_cents', 'min_order_cents'] as const;
+
   const vendors = new Map<string, Vendor>();
-  let currency = 'USD';
+  const vendorNames = new Map<string, string>();
+  let currency = '';
   let validUntil = '';
   for (const [i, line] of lines.slice(1).entries()) {
     const row = line.split(',');
@@ -113,42 +162,84 @@ export function parseCsvQuoteSet(text: string): { quoteSet?: QuoteSet; errors: s
       continue;
     }
     const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const priorName = vendorNames.get(id);
+    if (priorName !== undefined && priorName !== name) {
+      errors.push(`${label}: vendor "${name}" collides with "${priorName}" (same id "${id}")`);
+      continue;
+    }
+    vendorNames.set(id, name);
+    const fields = {
+      delivery_days: reqInt(row, 'delivery_days', label),
+      shipping_cents: reqInt(row, 'shipping_cents', label),
+      free_threshold_cents: optInt(row, 'free_threshold_cents', label),
+      min_order_cents: optInt(row, 'min_order_cents', label),
+    };
     let v = vendors.get(id);
     if (!v) {
       v = {
         id,
         name,
-        deliveryDays: parseInt(col(row, 'delivery_days'), 10),
-        shippingCents: parseInt(col(row, 'shipping_cents'), 10),
-        freeShipThresholdCents: col(row, 'free_threshold_cents')
-          ? parseInt(col(row, 'free_threshold_cents'), 10)
-          : null,
-        minOrderCents: col(row, 'min_order_cents') ? parseInt(col(row, 'min_order_cents'), 10) : null,
+        deliveryDays: fields.delivery_days,
+        shippingCents: fields.shipping_cents,
+        freeShipThresholdCents: fields.free_threshold_cents,
+        minOrderCents: fields.min_order_cents,
         quotes: {},
       };
       vendors.set(id, v);
+    } else {
+      const cur = {
+        delivery_days: v.deliveryDays,
+        shipping_cents: v.shippingCents,
+        free_threshold_cents: v.freeShipThresholdCents,
+        min_order_cents: v.minOrderCents,
+      };
+      for (const f of VENDOR_FIELDS) {
+        if (!Object.is(fields[f], cur[f])) {
+          errors.push(`${label}: ${f} "${col(row, f)}" conflicts with "${cur[f] ?? ''}" on earlier ${name} rows`);
+        }
+      }
     }
     const sku = col(row, 'sku');
     if (!sku) {
       errors.push(`${label}: empty sku`);
       continue;
     }
-    const unitCents = parseInt(col(row, 'unit_cents'), 10);
-    const stock = parseInt(col(row, 'stock'), 10);
-    if (!Number.isFinite(unitCents)) errors.push(`${label}: bad unit_cents`);
-    if (!Number.isFinite(stock)) errors.push(`${label}: bad stock`);
-    v.quotes[sku] = { skuId: sku, unitCents, stock };
-    if (col(row, 'currency')) currency = col(row, 'currency');
-    if (col(row, 'valid_until')) validUntil = col(row, 'valid_until');
+    if (v.quotes[sku]) {
+      errors.push(`${label}: duplicate quote for ${name} / ${sku}`);
+      continue;
+    }
+    const unitCents = reqInt(row, 'unit_cents', label);
+    const stock = reqInt(row, 'stock', label);
+    if (Number.isSafeInteger(unitCents) && Number.isSafeInteger(stock)) {
+      v.quotes[sku] = { skuId: sku, unitCents, stock };
+    }
+    const cur = col(row, 'currency');
+    if (cur) {
+      if (cur !== 'USD') errors.push(`${label}: currency must be USD (got "${cur}")`);
+      if (currency && cur !== currency) errors.push(`${label}: currency "${cur}" conflicts with "${currency}"`);
+      currency = currency || cur;
+    }
+    const vu = col(row, 'valid_until');
+    if (vu) {
+      if (Number.isNaN(Date.parse(vu))) {
+        errors.push(`${label}: valid_until "${vu}" is not a date`);
+      } else {
+        if (new Date(vu) < now) errors.push(`${label}: quote expired on ${vu}`);
+        if (validUntil && vu !== validUntil) {
+          errors.push(`${label}: valid_until "${vu}" conflicts with "${validUntil}"`);
+        }
+        validUntil = validUntil || vu;
+      }
+    }
   }
   if (errors.length > 0) return { errors };
   const qs: QuoteSet = {
-    currency,
+    currency: currency || 'USD',
     quotedAt: new Date().toISOString(),
     validUntil: validUntil || new Date(Date.now() + 30 * 86400e3).toISOString().slice(0, 10),
     vendors: [...vendors.values()],
   };
-  return validateQuoteSet(qs);
+  return validateQuoteSet(qs, now);
 }
 
 export const CSV_TEMPLATE = `# Cart Tetris quote template (example data, USD cents)
@@ -174,5 +265,5 @@ export function parseQuoteImport(text: string, now: Date = new Date()): { quoteS
       return { errors: [`invalid JSON: ${(e as Error).message}`] };
     }
   }
-  return parseCsvQuoteSet(trimmed);
+  return parseCsvQuoteSet(trimmed, now);
 }

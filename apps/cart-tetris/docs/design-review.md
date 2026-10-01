@@ -6,8 +6,9 @@ Compared `cart-tetris-concept.png` (1536×1024) against
 ## Reproduced faithfully
 
 - Top bar: bold "Cart Tetris" wordmark left, "Reset demo" link right, hairline rule.
-- Hero: 44px extrabold headline "The cheapest prices made the most expensive
-  cart.", muted sub-line, "Import quotes" / "Use example quotes" buttons.
+- Hero: extrabold headline "The cheapest prices made the most expensive
+  cart.", muted sub-line, "Import quotes" / "Use example quotes" buttons —
+  actions sit beside the hero on desktop, wrapping under it below 980px.
 - Left card "Your shopping list" with "Need delivery by" select, item rows
   (name + detail), bordered −/qty/+ steppers, trash actions, "+ Add item",
   full-width primary "Find the cheapest order", "Demo data. No real purchases."
@@ -35,6 +36,17 @@ instead:
   infeasibility panel, "Approval void" badge, the editable vendor-quotes grid
   (required for "price edited alters result"), the sandbox-mode footer badge.
 - Delivery select offers 1/2/3/5 days so the deadline mechanic is exercisable.
+
+## Geometry (audit-verified offsets)
+
+- Content starts at x=42 at 1536×1024 (`desktop-seed.png`), matching the
+  concept's 42px margin; page max-width 1600px.
+- "Cost comparison" card top is y≈510 at 1536 (concept ≈538) and the
+  approve/export row renders fully inside the 1024px viewport.
+- At 1366×768 (`desktop-1366.png`) the layout compacts (smaller hero, tighter
+  rows) and the approve/export row is a sticky card footer pinned to the
+  viewport bottom, so savings and approval are always visible without
+  scrolling even when the breakdown tables extend below the fold.
 
 ## Responsive / a11y checks
 

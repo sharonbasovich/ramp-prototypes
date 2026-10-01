@@ -1,10 +1,11 @@
 import type { BasketItem, QuoteSet } from '../engine/types';
+import type { Approval } from '../approval';
 
 export interface PersistedState {
   items: BasketItem[];
   deadlineDays: number;
   quoteSet: QuoteSet;
-  approval: { signature: string; approvedAt: string } | null;
+  approval: Approval | null;
 }
 
 export type StoreMode = 'server' | 'browser';

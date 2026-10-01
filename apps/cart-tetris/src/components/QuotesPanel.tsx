@@ -45,9 +45,13 @@ export default function QuotesPanel({ quoteSet, onApply }: Props) {
 
   const disp = (n: number): number | '' => (Number.isNaN(n) ? '' : n);
 
+  // Keep the raw value so Apply-time validation can reject it — never
+  // silently truncate decimals or turn a cleared field into 0.
   const num = (raw: string): number => {
-    const n = Number(raw);
-    return Number.isFinite(n) ? Math.trunc(n) : Number.NaN;
+    const t = raw.trim();
+    if (t === '') return Number.NaN;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : Number.NaN;
   };
 
   const numOrNull = (raw: string): number | null => (raw.trim() === '' ? null : num(raw));

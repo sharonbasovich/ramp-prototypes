@@ -54,7 +54,7 @@ function randomInput(rand: () => number, caseNo: number) {
   const quoteSet: QuoteSet = {
     currency: 'USD',
     quotedAt: '2026-01-01',
-    validUntil: '2027-01-01',
+    validUntil: '2099-01-01',
     vendors,
   };
   return { items, deadlineDays: 1 + Math.floor(rand() * 4), quoteSet };

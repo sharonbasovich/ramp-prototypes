@@ -7,6 +7,7 @@ import type {
   VendorOrder,
   VendorSkuQuote,
 } from './types';
+import { validateQuoteSet } from './validate';
 
 /**
  * Exact bounded basket optimizer.
@@ -48,8 +49,8 @@ export function unitPriceForQty(quote: VendorSkuQuote, qty: number): number {
   return best;
 }
 
-export function vendorOrderCost(itemsCents: number, vendor: Vendor): VendorOrder | null {
-  if (itemsCents <= 0) {
+export function vendorOrderCost(itemsCents: number, vendor: Vendor, used = itemsCents > 0): VendorOrder | null {
+  if (!used) {
     return { vendorId: vendor.id, itemsCents: 0, shippingCents: 0, orderCents: 0, freeShipApplied: false };
   }
   if (vendor.minOrderCents != null && itemsCents < vendor.minOrderCents) return null;
@@ -172,7 +173,9 @@ function evaluate(
   const picks: number[][] = positive.map(() => new Array<number>(nV).fill(0));
   let evaluated = 0;
   let best: Plan | null = null;
-  let bestKey = '';
+  let bestTotal = Number.POSITIVE_INFINITY;
+  let bestVendorCount = Number.POSITIVE_INFINITY;
+  let bestAllocKey = '';
 
   const buildPlan = (): Plan => {
     const allocations: Allocation[] = [];
@@ -195,10 +198,13 @@ function evaluate(
     let shipping = 0;
     let vendorCount = 0;
     for (let v = 0; v < nV; v++) {
-      const vo = vendorOrderCost(subs[v], vendors[v]);
+      // A vendor is "used" when any units were allocated to it — including
+      // zero-priced units, which still ship and still count toward minimums.
+      const used = picks.some((p) => p[v] > 0);
+      const vo = vendorOrderCost(subs[v], vendors[v], used);
       if (vo == null) throw new Error('unreachable');
       orders.push(vo);
-      if (vo.itemsCents > 0) {
+      if (used) {
         vendorCount++;
         shipping += vo.shippingCents;
       }
@@ -220,37 +226,43 @@ function evaluate(
     for (let v = 0; v < nV; v++) {
       const s = subs[v];
       const minOrder = vendors[v].minOrderCents;
-      if (s > 0 && minOrder != null && s < minOrder) return;
+      const used = picks.some((p) => p[v] > 0);
+      if (used && minOrder != null && s < minOrder) return;
       itemsCents += s;
+      if (!Number.isSafeInteger(itemsCents)) return;
     }
     let shipping = 0;
     let vendorCount = 0;
     for (let v = 0; v < nV; v++) {
-      const s = subs[v];
-      if (s === 0) continue;
+      const used = picks.some((p) => p[v] > 0);
+      if (!used) continue;
       vendorCount++;
+      const s = subs[v];
       const threshold = vendors[v].freeShipThresholdCents;
       if (threshold == null || s < threshold) {
         shipping += vendors[v].shippingCents;
       }
     }
     const total = itemsCents + shipping;
-    const key =
-      String(total).padStart(9, '0') +
-      '|' +
-      String(vendorCount).padStart(2, '0') +
-      '|' +
-      // Deterministic allocation tie-break: iterate (sku, vendor) in fixed
-      // order and prefer the plan whose first differing slot has more units,
-      // which concentrates the plan toward earlier vendors.
-      picks
-        .flatMap((p, i) =>
-          (eligible[i] ?? []).map((v) => String(MAX_QTY_PER_SKU - p[v]).padStart(2, '0')),
-        )
-        .join('');
-    if (best === null || key < bestKey) {
+    if (!Number.isSafeInteger(total)) return;
+    // Deterministic allocation tie-break: iterate (sku, vendor) in fixed
+    // order and prefer the plan whose first differing slot has more units,
+    // which concentrates the plan toward earlier vendors.
+    const allocKey = picks
+      .flatMap((p, i) =>
+        (eligible[i] ?? []).map((v) => String(MAX_QTY_PER_SKU - p[v]).padStart(2, '0')),
+      )
+      .join('');
+    if (
+      best === null ||
+      total < bestTotal ||
+      (total === bestTotal && vendorCount < bestVendorCount) ||
+      (total === bestTotal && vendorCount === bestVendorCount && allocKey < bestAllocKey)
+    ) {
       best = buildPlan();
-      bestKey = key;
+      bestTotal = total;
+      bestVendorCount = vendorCount;
+      bestAllocKey = allocKey;
     }
   };
 
@@ -288,9 +300,16 @@ function evaluate(
   return { best, evaluated };
 }
 
-export function solve(input: SolveInput): SolveResult {
+export function solve(input: SolveInput, now: Date = new Date()): SolveResult {
   const { items, quoteSet } = input;
   const positive = items.filter((it) => it.qty > 0);
+
+  // Quotes are revalidated at solve time (not just at import): expired or
+  // malformed sets must never produce a plan.
+  const { errors: quoteErrors } = validateQuoteSet(input.quoteSet, now);
+  if (quoteErrors.length > 0) {
+    return { status: 'infeasible', reasons: quoteErrors.map((e) => `quotes invalid: ${e}`) };
+  }
 
   const errors = validateBasics(input);
   if (errors.length > 0) return { status: 'infeasible', reasons: errors };
@@ -337,16 +356,16 @@ function validateBasics(input: SolveInput): string[] {
   const errs: string[] = [];
   const seen = new Set<string>();
   for (const it of input.items) {
-    if (!Number.isInteger(it.qty) || it.qty < 0) errs.push(`${it.name}: quantity must be a whole number >= 0`);
+    if (!Number.isSafeInteger(it.qty) || it.qty < 0) errs.push(`${it.name}: quantity must be a whole number >= 0`);
     if (seen.has(it.skuId)) errs.push(`${it.name}: duplicate item ${it.skuId}`);
     seen.add(it.skuId);
   }
-  if (!Number.isInteger(input.deadlineDays) || input.deadlineDays < 0) {
+  if (!Number.isSafeInteger(input.deadlineDays) || input.deadlineDays < 0) {
     errs.push('deadline must be a whole number of days >= 0');
   }
   for (const v of input.quoteSet.vendors) {
-    if (!Number.isInteger(v.shippingCents) || v.shippingCents < 0) errs.push(`${v.name}: invalid shipping fee`);
-    if (!Number.isInteger(v.deliveryDays) || v.deliveryDays < 0) errs.push(`${v.name}: invalid delivery time`);
+    if (!Number.isSafeInteger(v.shippingCents) || v.shippingCents < 0) errs.push(`${v.name}: invalid shipping fee`);
+    if (!Number.isSafeInteger(v.deliveryDays) || v.deliveryDays < 0) errs.push(`${v.name}: invalid delivery time`);
   }
   return errs;
 }
@@ -355,6 +374,7 @@ function validateBasics(input: SolveInput): string[] {
 export function singleVendorBaseline(input: SolveInput): { vendor: Vendor; order: VendorOrder } | null {
   const { items, deadlineDays, quoteSet } = input;
   const positive = items.filter((it) => it.qty > 0);
+  if (positive.length === 0) return null;
   let best: { vendor: Vendor; order: VendorOrder } | null = null;
   for (const v of quoteSet.vendors) {
     if (v.deliveryDays > deadlineDays) continue;
@@ -369,7 +389,7 @@ export function singleVendorBaseline(input: SolveInput): { vendor: Vendor; order
       itemsCents += it.qty * unitPriceForQty(q, it.qty);
     }
     if (!ok) continue;
-    const order = vendorOrderCost(itemsCents, v);
+    const order = vendorOrderCost(itemsCents, v, true);
     if (!order) continue;
     if (!best || order.orderCents < best.order.orderCents) best = { vendor: v, order };
   }
